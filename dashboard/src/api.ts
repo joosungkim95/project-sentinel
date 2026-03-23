@@ -5,7 +5,9 @@
  * In production, FastAPI serves the built files directly.
  */
 
-const BASE = '/api';
+// In dev, Vite proxies /api/* to localhost:8000.
+// In production, FastAPI serves everything on the same origin — no prefix needed.
+const BASE = import.meta.env.DEV ? '/api' : '';
 
 async function get<T>(path: string): Promise<T> {
   const res = await fetch(`${BASE}${path}`);
