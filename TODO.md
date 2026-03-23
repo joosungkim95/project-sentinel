@@ -3,38 +3,38 @@
 ## Current Sprint: Phase 1 — Core Infrastructure
 
 ### Priority 1: Foundation
-- [ ] Set up pyproject.toml with dependencies
-- [ ] Configure Docker Compose (app + postgres + redis)
-- [ ] Set up Alembic for database migrations
-- [ ] Create SQLAlchemy models for all core tables
-- [ ] Run initial migration
+- [x] Set up pyproject.toml with dependencies
+- [x] Configure Docker Compose (app + postgres + redis)
+- [x] Set up Alembic for database migrations
+- [x] Create SQLAlchemy models for all core tables
+- [x] Run initial migration
 
 ### Priority 2: Risk Engine
-- [ ] Define Signal and TradeResult data models (Pydantic)
-- [ ] Implement RiskEngine.evaluate() interface
-- [ ] Hard floor rule (seed capital protection)
-- [ ] Position sizing limits (per-position and per-asset-class)
-- [ ] Daily loss circuit breaker
-- [ ] Weekly drawdown limiter
-- [ ] Write comprehensive unit tests for all rules
-- [ ] Risk event logging to database
+- [x] Define Signal and TradeResult data models (Pydantic)
+- [x] Implement RiskEngine.evaluate() interface
+- [x] Hard floor rule (seed capital protection)
+- [x] Position sizing limits (per-position and per-asset-class)
+- [x] Daily loss circuit breaker
+- [x] Weekly drawdown limiter
+- [x] Write comprehensive unit tests for all rules
+- [x] Risk event logging to database
 
 ### Priority 3: First Platform Connection
-- [ ] Alpaca client wrapper (paper trading mode)
+- [x] Alpaca client wrapper (paper trading mode)
 - [ ] Fetch quotes, account info, positions
 - [ ] Place test order and confirm execution
-- [ ] Execution Engine adapter for Alpaca
+- [x] Execution Engine adapter for Alpaca
 
 ### Priority 4: First Strategy
-- [ ] Abstract Strategy base class
-- [ ] SMA Crossover strategy for SPY
-- [ ] Wire: Strategy → Risk Engine → Execution → Logging
+- [x] Abstract Strategy base class
+- [x] SMA Crossover strategy for SPY
+- [x] Wire: Strategy → Risk Engine → Execution → Logging
 - [ ] Verify full pipeline with paper trade
 
 ### Priority 5: Monitoring
-- [ ] Health check endpoint (/health)
-- [ ] Discord webhook alert utility
-- [ ] Alert on: trade executed, risk limit hit, system error
+- [x] Health check endpoint (/health)
+- [x] Discord webhook alert utility
+- [x] Alert on: trade executed, risk limit hit, system error
 
 ---
 
@@ -73,3 +73,8 @@
 - [x] Project scaffolding and directory structure
 - [x] CLAUDE.md development guide
 - [x] TODO.md task tracker
+- [x] SQLAlchemy ORM models for all 6 core tables (trades, strategy_performance, risk_events, strategy_hypotheses, market_regimes, portfolio_snapshots)
+- [x] Alembic async migrations with initial schema
+- [x] Repository layer (trades, risk events, portfolio, strategy performance)
+- [x] Database persistence wired into trading pipeline
+- [x] FastAPI endpoints wired to database (/portfolio, /trades, /health)
