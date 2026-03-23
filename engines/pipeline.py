@@ -9,6 +9,9 @@ import logging
 from datetime import datetime
 from typing import Any
 
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from data.repositories.trades import insert_rejected_signal, insert_trade
 from engines.alerts import (
     alert_circuit_breaker,
     alert_risk_event,
@@ -42,10 +45,12 @@ class TradingPipeline:
         risk_engine: RiskEngine,
         executor: Executor,
         strategies: list[Strategy],
+        db_session: AsyncSession | None = None,
     ):
         self.risk_engine = risk_engine
         self.executor = executor
         self.strategies = strategies
+        self._db_session = db_session
         self._trade_log: list[dict[str, Any]] = []
 
     async def run_cycle(self, market_regime: MarketRegime) -> list[TradeResult]:
@@ -90,7 +95,7 @@ class TradingPipeline:
                             ),
                             portfolio_value=portfolio.total_value,
                         )
-                        self._log_outcome(signal, risk_result, None)
+                        await self._log_outcome(signal, risk_result, None)
                         continue
 
                     # 3. Execute
@@ -120,7 +125,7 @@ class TradingPipeline:
                             trade_result.error_message,
                         )
 
-                    self._log_outcome(signal, risk_result, trade_result)
+                    await self._log_outcome(signal, risk_result, trade_result)
 
                     # Refresh portfolio after each trade
                     portfolio = await self.executor.get_portfolio_snapshot()
@@ -156,7 +161,7 @@ class TradingPipeline:
         max_drawdown = 100.0 - self.risk_engine.config.hard_floor_pct
         return portfolio.drawdown_from_peak >= max_drawdown
 
-    def _log_outcome(self, signal, risk_result, trade_result) -> None:
+    async def _log_outcome(self, signal, risk_result, trade_result) -> None:
         """Log the full outcome for the Learning Engine to ingest."""
         self._trade_log.append({
             "timestamp": datetime.utcnow().isoformat(),
@@ -167,7 +172,13 @@ class TradingPipeline:
             "fill_price": trade_result.fill_price if trade_result else None,
             "error": trade_result.error_message if trade_result else None,
         })
-        # TODO: Write to database instead of in-memory list
+
+        if self._db_session is not None:
+            if trade_result is not None and trade_result.executed:
+                await insert_trade(self._db_session, trade_result)
+            elif risk_result.decision == RiskDecision.REJECTED:
+                await insert_rejected_signal(self._db_session, risk_result)
+            await self._db_session.commit()
 
     def get_trade_log(self) -> list[dict[str, Any]]:
         """Get the trade log for the Learning Engine."""
