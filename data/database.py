@@ -14,10 +14,13 @@ from sqlalchemy.ext.asyncio import (
     create_async_engine,
 )
 
-DATABASE_URL = os.getenv(
+_raw_url = os.getenv(
     "DATABASE_URL",
     "postgresql+asyncpg://sentinel:sentinel_dev@localhost:5432/sentinel",
 )
+
+# Railway provides postgresql:// but asyncpg needs postgresql+asyncpg://
+DATABASE_URL = _raw_url.replace("postgresql://", "postgresql+asyncpg://", 1)
 
 engine = create_async_engine(
     DATABASE_URL,

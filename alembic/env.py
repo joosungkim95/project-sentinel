@@ -18,6 +18,8 @@ if config.config_file_name is not None:
 # Respect DATABASE_URL env var (same as data/database.py)
 url_override = os.getenv("DATABASE_URL")
 if url_override:
+    # Railway provides postgresql:// but asyncpg needs postgresql+asyncpg://
+    url_override = url_override.replace("postgresql://", "postgresql+asyncpg://", 1)
     config.set_main_option("sqlalchemy.url", url_override)
 
 target_metadata = Base.metadata

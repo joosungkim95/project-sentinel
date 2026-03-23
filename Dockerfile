@@ -1,12 +1,33 @@
+# Stage 1: Build the React dashboard
+FROM node:22-alpine AS dashboard-build
+WORKDIR /dashboard
+COPY dashboard/package.json dashboard/package-lock.json ./
+RUN npm ci
+COPY dashboard/ ./
+RUN npm run build
+# Output lands in /dashboard/../api/static → we'll copy from /api/static
+
+# Stage 2: Python app
 FROM python:3.12-slim
 
 WORKDIR /app
 
+# Install Python deps first (caches layer)
 COPY pyproject.toml .
 RUN pip install --no-cache-dir .
 
+# Copy application code
 COPY . .
 
-EXPOSE 8000
+# Copy built dashboard into api/static/
+COPY --from=dashboard-build /api/static /app/api/static
 
-CMD ["uvicorn", "api.main:app", "--host", "0.0.0.0", "--port", "8000"]
+# Railway sets PORT dynamically
+ENV PORT=8000
+EXPOSE ${PORT}
+
+# Health check for Railway
+HEALTHCHECK --interval=30s --timeout=5s --retries=3 \
+  CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:${PORT}/health')"
+
+CMD ["bash", "scripts/start.sh"]

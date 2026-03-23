@@ -42,11 +42,11 @@
 - [x] Coinbase Advanced Trade API connection (CDP keys, market data, order placement)
 - [x] Kalshi demo API connection (RSA auth, orders, positions, market data)
 - ~~Polymarket API connection~~ (blocked — US trading restricted)
-- [ ] Scheduler: run strategies on cron (APScheduler — 15min equities, 5min crypto)
-- [ ] Momentum strategy (equities)
-- [ ] Trend following strategy (crypto)
-- [ ] Model-based pricing strategy (prediction markets / Kalshi)
-- [ ] React dashboard (portfolio, positions, P&L, trades)
+- [x] Scheduler: run strategies on cron (APScheduler — 15min equities, 5min crypto)
+- [x] Momentum strategy (equities)
+- [x] Trend following strategy (crypto)
+- [x] Model-based pricing strategy (prediction markets / Kalshi)
+- [x] React dashboard (portfolio, positions, P&L, trades)
 
 ## Phase 3 Backlog
 - [ ] Memory/context management layer
@@ -83,3 +83,11 @@
 - [x] Coinbase adapter: CDP auth, market data, BUY/SELL verified with real money
 - [x] Kalshi adapter: RSA-PSS auth, market data, limit orders verified on demo
 - [x] DB migration: widened symbol column for Kalshi tickers (VARCHAR 20→100)
+- [x] APScheduler: equities/15min, crypto/5min, predictions/10min with market hours, error tracking, pause/resume
+- [x] FastAPI wired: scheduler lifecycle, emergency stop, per-asset pause/resume, /strategies endpoint
+- [x] Momentum strategy (QQQ): ROC + RSI + volume confirmation, registered in app startup
+- [x] Pipeline: auto-fetches historical bars from adapters before running strategies
+- [x] Trend following strategy (BTC-USD, ETH-USD): EMA crossover + ADX trend strength + ATR stop-loss
+- [x] Value pricing strategy (Kalshi): spread analysis, edge detection, liquidity filters, ranked signals
+- [x] Pipeline: prediction market data fetching (market listings + quotes instead of bars)
+- [x] React dashboard: Vite+React+TS+Tailwind, dark mode, polls API, emergency stop, scheduler controls

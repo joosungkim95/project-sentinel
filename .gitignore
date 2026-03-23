@@ -24,3 +24,7 @@ Thumbs.db
 # Data
 *.db
 *.sqlite
+
+# Dashboard
+dashboard/node_modules/
+api/static/
