@@ -39,7 +39,7 @@
 ---
 
 ## Phase 2 Backlog
-- [ ] Coinbase sandbox connection
+- [x] Coinbase Advanced Trade API connection (CDP keys, market data, order placement)
 - [ ] Polymarket API connection + paper trade simulator
 - [ ] Kalshi demo API connection
 - [ ] Momentum strategy (equities)

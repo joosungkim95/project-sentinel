@@ -20,7 +20,8 @@ dependencies = [
 
     # Trading APIs
     "alpaca-py>=0.21.0",
-    "httpx>=0.27.0",          # For Polymarket, Kalshi, Coinbase
+    "coinbase-advanced-py>=1.0.0",
+    "httpx>=0.27.0",          # For Polymarket, Kalshi
 
     # Data & Analysis
     "pandas>=2.2.0",
