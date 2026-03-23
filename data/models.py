@@ -38,7 +38,7 @@ class TradeRecord(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     strategy_id = Column(String(100), nullable=False, index=True)
     asset_class = Column(String(20), nullable=False, index=True)
-    symbol = Column(String(20), nullable=False, index=True)
+    symbol = Column(String(100), nullable=False, index=True)
     side = Column(String(10), nullable=False)
     quantity = Column(Float, nullable=False)
     price = Column(Float, nullable=False)

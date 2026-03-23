@@ -40,8 +40,8 @@
 
 ## Phase 2 Backlog
 - [x] Coinbase Advanced Trade API connection (CDP keys, market data, order placement)
-- [ ] Polymarket API connection + paper trade simulator
-- [ ] Kalshi demo API connection
+- [ ] Polymarket API connection (blocked — US trading restricted)
+- [x] Kalshi demo API connection (RSA auth, orders, positions, market data)
 - [ ] Momentum strategy (equities)
 - [ ] Trend following strategy (crypto)
 - [ ] Model-based pricing strategy (prediction markets)
