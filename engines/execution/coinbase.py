@@ -114,7 +114,10 @@ class CoinbaseAdapter:
                         base_size=str(quantity),
                     )
 
-            order_id = order.get("order_id", order.get("success_response", {}).get("order_id", ""))
+            order_id = ""
+            if order.success and order.success_response:
+                order_id = order.success_response.get("order_id", "")
+
             logger.info(
                 "Coinbase order submitted: %s %s %s (id=%s)",
                 signal.side.value,
@@ -122,6 +125,9 @@ class CoinbaseAdapter:
                 product_id,
                 order_id,
             )
+
+            if not order.success:
+                raise RuntimeError(f"Order rejected: {order.to_dict()}")
 
             return TradeResult(
                 trade_id=order_id or client_order_id,
