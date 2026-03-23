@@ -29,7 +29,7 @@
 - [x] Abstract Strategy base class
 - [x] SMA Crossover strategy for SPY
 - [x] Wire: Strategy → Risk Engine → Execution → Logging
-- [ ] Verify full pipeline with paper trade
+- [x] Verify full pipeline with paper trade
 
 ### Priority 5: Monitoring
 - [x] Health check endpoint (/health)
@@ -78,3 +78,5 @@
 - [x] Repository layer (trades, risk events, portfolio, strategy performance)
 - [x] Database persistence wired into trading pipeline
 - [x] FastAPI endpoints wired to database (/portfolio, /trades, /health)
+- [x] Alpaca paper trading verified (connect, quote, order, position, close)
+- [x] Full pipeline end-to-end: Signal → Risk Engine → Alpaca Execute → DB Persist

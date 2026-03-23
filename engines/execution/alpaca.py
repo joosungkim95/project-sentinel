@@ -261,12 +261,14 @@ class AlpacaAdapter:
         Args:
             symbol: Stock symbol.
             timeframe: Bar size (1Min, 5Min, 15Min, 1Hour, 1Day).
-            limit: Number of bars.
+            limit: Number of bars to fetch.
 
         Returns:
             List of bar dicts with open, high, low, close, volume.
         """
         try:
+            from datetime import datetime, timedelta
+
             from alpaca.data.requests import StockBarsRequest
             from alpaca.data.timeframe import TimeFrame
 
@@ -278,10 +280,18 @@ class AlpacaAdapter:
                 "1Day": TimeFrame.Day,
             }
 
+            # Use explicit date range — free tier needs it for > 1 bar
+            # Trading days ~= calendar days * 5/7, so multiply by ~1.5
+            tf = tf_map.get(timeframe, TimeFrame.Day)
+            days_back = int(limit * 1.5) + 30 if tf == TimeFrame.Day else limit
+            end = datetime.now()
+            start = end - timedelta(days=days_back)
+
             request = StockBarsRequest(
                 symbol_or_symbols=symbol,
-                timeframe=tf_map.get(timeframe, TimeFrame.Day),
-                limit=limit,
+                timeframe=tf,
+                start=start,
+                end=end,
             )
             bars = self._data_client.get_stock_bars(request)
 
