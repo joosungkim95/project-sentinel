@@ -50,6 +50,9 @@ backtesting = [
     "matplotlib>=3.8.0",
 ]
 
+[tool.setuptools.packages.find]
+include = ["api*", "config*", "data*", "engines*", "memory*", "backtesting*"]
+
 [tool.ruff]
 line-length = 88
 target-version = "py312"
