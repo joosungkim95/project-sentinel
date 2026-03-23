@@ -206,35 +206,38 @@ class AlpacaAdapter:
 
     async def close_position(
         self, symbol: str, quantity: Optional[float] = None
-    ) -> TradeResult:
-        """Close a position on Alpaca."""
+    ) -> dict[str, Any]:
+        """
+        Close a position on Alpaca.
+
+        Args:
+            symbol: Stock symbol to close.
+            quantity: Shares to close. None = close all.
+
+        Returns:
+            Dict with execution details (order_id, executed, error).
+        """
         try:
             if quantity:
-                self._trading_client.close_position(
+                order = self._trading_client.close_position(
                     symbol, qty=str(quantity)
                 )
             else:
-                self._trading_client.close_position(symbol)
+                order = self._trading_client.close_position(symbol)
 
             logger.info("Closed position: %s (qty=%s)", symbol, quantity or "all")
-            # Return a simplified result
-            return TradeResult(
-                trade_id=f"close_{symbol}_{datetime.utcnow().timestamp()}",
-                signal=None,  # type: ignore
-                risk_check=None,  # type: ignore
-                executed=True,
-                platform=self.platform_name,
-            )
+            return {
+                "order_id": str(order.id) if order else None,
+                "executed": True,
+                "symbol": symbol,
+            }
         except Exception as e:
             logger.error("Failed to close position %s: %s", symbol, e)
-            return TradeResult(
-                trade_id="",
-                signal=None,  # type: ignore
-                risk_check=None,  # type: ignore
-                executed=False,
-                error_message=str(e),
-                platform=self.platform_name,
-            )
+            return {
+                "executed": False,
+                "symbol": symbol,
+                "error": str(e),
+            }
 
     async def cancel_all_orders(self) -> int:
         """Cancel all open orders."""

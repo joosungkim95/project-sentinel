@@ -21,8 +21,8 @@
 
 ### Priority 3: First Platform Connection
 - [x] Alpaca client wrapper (paper trading mode)
-- [ ] Fetch quotes, account info, positions
-- [ ] Place test order and confirm execution
+- [x] Fetch quotes, account info, positions
+- [x] Place test order and confirm execution
 - [x] Execution Engine adapter for Alpaca
 
 ### Priority 4: First Strategy
