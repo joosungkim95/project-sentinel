@@ -1,6 +1,6 @@
 # TODO.md — Sentinel Development Tracker
 
-## Current Sprint: Phase 1 — Core Infrastructure
+## Current Sprint: Phase 2 — Multi-Platform & Strategies
 
 ### Priority 1: Foundation
 - [x] Set up pyproject.toml with dependencies
@@ -38,14 +38,14 @@
 
 ---
 
-## Phase 2 Backlog
+## Phase 2 — Next Up
 - [x] Coinbase Advanced Trade API connection (CDP keys, market data, order placement)
-- [ ] Polymarket API connection (blocked — US trading restricted)
 - [x] Kalshi demo API connection (RSA auth, orders, positions, market data)
+- ~~Polymarket API connection~~ (blocked — US trading restricted)
+- [ ] Scheduler: run strategies on cron (APScheduler — 15min equities, 5min crypto)
 - [ ] Momentum strategy (equities)
 - [ ] Trend following strategy (crypto)
-- [ ] Model-based pricing strategy (prediction markets)
-- [ ] Cross-platform arbitrage detection (Polymarket vs Kalshi)
+- [ ] Model-based pricing strategy (prediction markets / Kalshi)
 - [ ] React dashboard (portfolio, positions, P&L, trades)
 
 ## Phase 3 Backlog
@@ -80,3 +80,6 @@
 - [x] FastAPI endpoints wired to database (/portfolio, /trades, /health)
 - [x] Alpaca paper trading verified (connect, quote, order, position, close)
 - [x] Full pipeline end-to-end: Signal → Risk Engine → Alpaca Execute → DB Persist
+- [x] Coinbase adapter: CDP auth, market data, BUY/SELL verified with real money
+- [x] Kalshi adapter: RSA-PSS auth, market data, limit orders verified on demo
+- [x] DB migration: widened symbol column for Kalshi tickers (VARCHAR 20→100)
