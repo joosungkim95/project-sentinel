@@ -4,6 +4,11 @@
 
 set -e
 
+echo "=== Sentinel Startup ==="
+echo "Python: $(python --version)"
+echo "Testing imports..."
+python -c "from api.main import app; print('Imports OK')" || { echo "IMPORT FAILED"; exit 1; }
+
 echo "Running database migrations..."
 python -m alembic upgrade head
 

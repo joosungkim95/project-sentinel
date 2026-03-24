@@ -12,8 +12,9 @@ FROM python:3.12-slim
 
 WORKDIR /app
 
-# Install Python deps first (caches layer)
+# Install Python deps
 COPY pyproject.toml .
+# Bust cache: phase3+4 v2
 RUN pip install --no-cache-dir .
 
 # Copy application code (Phase 3+4: learning engine, shadow mode, 8 strategies)
