@@ -16,7 +16,7 @@ WORKDIR /app
 COPY pyproject.toml .
 RUN pip install --no-cache-dir .
 
-# Copy application code
+# Copy application code (Phase 3+4: learning engine, shadow mode, 8 strategies)
 COPY . .
 
 # Copy built dashboard into api/static/
