@@ -14,8 +14,7 @@ WORKDIR /app
 
 # Install Python deps
 COPY pyproject.toml .
-# Bust cache: phase3+4 v2
-RUN pip install --no-cache-dir .
+RUN pip install --no-cache-dir . tzdata
 
 # Copy application code (Phase 3+4: learning engine, shadow mode, 8 strategies)
 COPY . .
