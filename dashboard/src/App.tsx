@@ -4,6 +4,9 @@ import {
   fetchPortfolio,
   fetchTrades,
   fetchStrategies,
+  fetchRiskEvents,
+  fetchSystemHealth,
+  fetchLearning,
   emergencyStop,
   pauseAsset,
   resumeAsset,
@@ -12,6 +15,9 @@ import {
   type TradesData,
   type StrategiesData,
   type SchedulerJob,
+  type RiskEventsData,
+  type SystemHealthData,
+  type LearningData,
 } from './api';
 import { usePolling } from './hooks';
 
@@ -247,6 +253,101 @@ function ConnectionsPanel({ health }: { health: HealthData | null }) {
   );
 }
 
+function RiskEventsPanel({ data }: { data: RiskEventsData | null }) {
+  if (!data || data.events.length === 0) return null;
+  const severityColor: Record<string, string> = {
+    info: 'zinc',
+    warning: 'yellow',
+    critical: 'red',
+  };
+  return (
+    <Card title="Risk Events">
+      <div className="space-y-2 max-h-48 overflow-y-auto">
+        {data.events.map((e) => (
+          <div key={e.id} className="flex items-center justify-between bg-zinc-950 rounded px-3 py-2 border border-zinc-800">
+            <div className="flex items-center gap-2">
+              <Badge color={severityColor[e.severity] ?? 'zinc'}>{e.severity}</Badge>
+              <span className="text-sm text-zinc-300">{e.event_type}</span>
+              <span className="text-xs text-zinc-500">{e.action_taken}</span>
+            </div>
+            <span className="text-xs text-zinc-500 font-mono">
+              {e.created_at ? new Date(e.created_at).toLocaleTimeString() : '--'}
+            </span>
+          </div>
+        ))}
+      </div>
+    </Card>
+  );
+}
+
+function SystemHealthPanel({ data }: { data: SystemHealthData | null }) {
+  if (!data) return null;
+  const h = data.health;
+  const overallColor = h.overall === 'healthy' ? 'green' : h.overall === 'degraded' ? 'yellow' : 'red';
+  return (
+    <Card title="System Health">
+      <div className="flex items-center gap-3 mb-4">
+        <Badge color={overallColor}>{h.overall.toUpperCase()}</Badge>
+        <span className="text-xs text-zinc-500 font-mono">{h.healthy}/{h.total} components healthy</span>
+        {data.risk_engine.circuit_breaker_active && (
+          <Badge color="red">CIRCUIT BREAKER</Badge>
+        )}
+      </div>
+      <div className="space-y-1">
+        {Object.entries(h.components).map(([name, comp]) => (
+          <div key={name} className="flex items-center justify-between text-sm">
+            <span className="text-zinc-400">{name}</span>
+            <div className="flex items-center gap-2">
+              <Badge color={comp.status === 'healthy' ? 'green' : comp.status === 'degraded' ? 'yellow' : 'red'}>
+                {comp.status}
+              </Badge>
+              {comp.total_failures > 0 && (
+                <span className="text-xs text-zinc-500 font-mono">{comp.total_failures} failures</span>
+              )}
+            </div>
+          </div>
+        ))}
+      </div>
+      {h.recent_events.length > 0 && (
+        <div className="mt-3 pt-3 border-t border-zinc-800">
+          <div className="text-xs text-zinc-500 mb-2">Recent Events</div>
+          {h.recent_events.slice(0, 3).map((ev, i) => (
+            <div key={i} className="text-xs text-zinc-500 font-mono truncate">
+              {new Date(ev.time).toLocaleTimeString()} [{ev.type}] {ev.details}
+            </div>
+          ))}
+        </div>
+      )}
+    </Card>
+  );
+}
+
+function LearningPanel({ data }: { data: LearningData | null }) {
+  if (!data) return null;
+  return (
+    <Card title="Learning Engine">
+      <div className="flex items-center gap-3 mb-3">
+        <Badge color={data.learning.enabled ? 'green' : 'zinc'}>
+          {data.learning.enabled ? 'ENABLED' : 'DISABLED'}
+        </Badge>
+        <Badge color={data.scheduler_running ? 'green' : 'red'}>
+          {data.scheduler_running ? 'SCHEDULER ON' : 'SCHEDULER OFF'}
+        </Badge>
+      </div>
+      <div className="space-y-1 text-sm">
+        <div className="flex justify-between">
+          <span className="text-zinc-500">Fast loop (daily)</span>
+          <span className="font-mono text-zinc-300">{data.learning.fast_loop}</span>
+        </div>
+        <div className="flex justify-between">
+          <span className="text-zinc-500">Slow loop (weekly)</span>
+          <span className="font-mono text-zinc-300">{data.learning.slow_loop}</span>
+        </div>
+      </div>
+    </Card>
+  );
+}
+
 // --- Main App ---
 
 export default function App() {
@@ -256,11 +357,17 @@ export default function App() {
   const portfolioFetcher = useCallback(() => fetchPortfolio(), []);
   const tradesFetcher = useCallback(() => fetchTrades(20), []);
   const strategiesFetcher = useCallback(() => fetchStrategies(), []);
+  const riskEventsFetcher = useCallback(() => fetchRiskEvents(10), []);
+  const systemHealthFetcher = useCallback(() => fetchSystemHealth(), []);
+  const learningFetcher = useCallback(() => fetchLearning(), []);
 
   const health = usePolling(healthFetcher, 5000);
   const portfolio = usePolling(portfolioFetcher, 10000);
   const trades = usePolling(tradesFetcher, 10000);
   const strategies = usePolling(strategiesFetcher, 15000);
+  const riskEvents = usePolling(riskEventsFetcher, 15000);
+  const systemHealth = usePolling(systemHealthFetcher, 10000);
+  const learning = usePolling(learningFetcher, 30000);
 
   const handleEmergencyStop = async () => {
     if (!confirm('EMERGENCY STOP: This will halt all trading. Continue?')) return;
@@ -329,6 +436,13 @@ export default function App() {
         </div>
 
         <TradesPanel data={trades.data} />
+
+        <RiskEventsPanel data={riskEvents.data} />
+
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          <SystemHealthPanel data={systemHealth.data} />
+          <LearningPanel data={learning.data} />
+        </div>
 
         <ConnectionsPanel health={health.data} />
       </main>

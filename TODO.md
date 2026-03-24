@@ -48,24 +48,24 @@
 - [x] Model-based pricing strategy (prediction markets / Kalshi)
 - [x] React dashboard (portfolio, positions, P&L, trades)
 
-## Phase 3 Backlog
-- [ ] Memory/context management layer
-- [ ] Learning Engine fast loop (daily parameter updates)
-- [ ] Learning Engine slow loop (weekly strategy evaluation)
-- [ ] Claude API integration for strategy hypothesis generation
-- [ ] Backtesting framework
-- [ ] Strategy graveyard and resurrection logic
-- [ ] Mean reversion strategy (equities)
-- [ ] Volatility harvesting strategy (crypto)
-- [ ] News-driven trading strategy (prediction markets)
+## Phase 3 — Complete
+- [x] Memory/context management layer (ContextManager wired to DB, TradeJournal, StrategyJournal, MarketRegimeTracker, LearningContext)
+- [x] Learning Engine fast loop (daily: metrics aggregation, regime classification, performance persistence, daily summary alerts)
+- [x] Learning Engine slow loop (weekly: Claude API analysis via Sonnet, hypothesis generation, strategy recommendations, prompt caching)
+- [x] Claude API integration for strategy hypothesis generation (wired into slow loop with cost controls, JSON structured output)
+- [x] Backtesting framework (BacktestEngine, synthetic data generators, walk-forward slicing, equity curve + Sharpe + max drawdown)
+- [x] Strategy graveyard and resurrection logic (GraveyardManager: cooldown, regime matching, max resurrections, paper trading enforcement)
+- [x] Mean reversion strategy (equities): Bollinger Bands + RSI, regime-aware (skips trending markets), take-profit at middle band
+- [x] Volatility harvesting strategy (crypto): BB width spike/crush detection + ATR decline, enters after vol contraction
+- [x] News-driven strategy (predictions): volume/price spike detection, momentum riding, ranked by score
 
-## Phase 4 Backlog
-- [ ] Risk Engine stress testing (simulated crashes)
-- [ ] Shadow mode (real trades at minimum size)
-- [ ] Divergence detection (real vs paper)
-- [ ] Error recovery and graceful degradation
-- [ ] Full system monitoring dashboard
-- [ ] Runbook for manual intervention
+## Phase 4 — Complete
+- [x] Risk Engine stress testing (6 scenarios: flash crash, correlated selloff, gap down, cascading failure, concentration drift, slow bleed)
+- [x] Shadow mode (ShadowExecutor: min-size live + full-size paper in parallel, auto-pause on divergence)
+- [x] Divergence detection (fill price, fill rate, latency divergence tracking with rolling stats and alerting)
+- [x] Error recovery and graceful degradation (HealthMonitor, exponential backoff, auto-recovery, GracefulDegradation with cache fallback)
+- [x] Full system monitoring dashboard (risk events, system health, learning engine panels + /risk-events, /performance, /system-health, /learning API endpoints)
+- [x] Runbook for manual intervention (docs/RUNBOOK.md — emergency procedures, routine ops, shadow mode promotion, monitoring checklists)
 
 ---
 
@@ -91,3 +91,4 @@
 - [x] Value pricing strategy (Kalshi): spread analysis, edge detection, liquidity filters, ranked signals
 - [x] Pipeline: prediction market data fetching (market listings + quotes instead of bars)
 - [x] React dashboard: Vite+React+TS+Tailwind, dark mode, polls API, emergency stop, scheduler controls
+- [x] Railway deployment: Dockerfile, Postgres, Redis, auto-deploy from GitHub, live at sentinel-production-c4dd.up.railway.app

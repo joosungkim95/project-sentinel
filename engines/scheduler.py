@@ -16,6 +16,7 @@ from datetime import datetime
 
 import pytz
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
 
 from config.scheduler_config import SchedulerConfig
@@ -112,6 +113,50 @@ class TradingScheduler:
                 asset_class.value,
                 interval,
                 len(strategies),
+            )
+
+        # --- Learning Engine jobs ---
+        if self.config.learning_enabled:
+            et = pytz.timezone(self.config.market_hours.timezone)
+
+            # Fast loop: daily after market close
+            self._scheduler.add_job(
+                self._run_fast_loop,
+                trigger=CronTrigger(
+                    hour=self.config.fast_loop_hour,
+                    minute=self.config.fast_loop_minute,
+                    timezone=et,
+                ),
+                id="learning_fast_loop",
+                name="Daily learning fast loop",
+                max_instances=1,
+                misfire_grace_time=300,
+            )
+            logger.info(
+                "Scheduled fast loop: daily at %02d:%02d ET",
+                self.config.fast_loop_hour,
+                self.config.fast_loop_minute,
+            )
+
+            # Slow loop: weekly
+            self._scheduler.add_job(
+                self._run_slow_loop,
+                trigger=CronTrigger(
+                    day_of_week=self.config.slow_loop_day,
+                    hour=self.config.slow_loop_hour,
+                    minute=self.config.slow_loop_minute,
+                    timezone=et,
+                ),
+                id="learning_slow_loop",
+                name="Weekly learning slow loop",
+                max_instances=1,
+                misfire_grace_time=600,
+            )
+            logger.info(
+                "Scheduled slow loop: %s at %02d:%02d ET",
+                self.config.slow_loop_day,
+                self.config.slow_loop_hour,
+                self.config.slow_loop_minute,
             )
 
         self._scheduler.start()
@@ -227,6 +272,50 @@ class TradingScheduler:
                     level=AlertLevel.CRITICAL,
                 )
 
+    async def _run_fast_loop(self) -> None:
+        """Run the daily learning fast loop."""
+        logger.info("Starting daily fast loop")
+        try:
+            from engines.learning.fast_loop import FastLoop
+
+            async with async_session_factory() as session:
+                loop = FastLoop(session)
+                result = await loop.run()
+                logger.info(
+                    "Fast loop complete: %d strategies",
+                    len(result.get("strategies", {})),
+                )
+        except Exception as e:
+            logger.error("Fast loop failed: %s", e, exc_info=True)
+            await alert_system_error(
+                error=f"Daily fast loop failed: {e}",
+                component="LearningEngine/FastLoop",
+            )
+
+    async def _run_slow_loop(self) -> None:
+        """Run the weekly learning slow loop."""
+        logger.info("Starting weekly slow loop")
+        try:
+            from engines.learning.slow_loop import SlowLoop
+
+            async with async_session_factory() as session:
+                # Get current portfolio from executor
+                portfolio = await self.executor.get_portfolio_snapshot()
+
+                loop = SlowLoop(session)
+                result = await loop.run(portfolio, period_days=7)
+                logger.info(
+                    "Slow loop complete: %d hypotheses, %d recommendations",
+                    len(result.get("hypotheses", [])),
+                    len(result.get("recommendations", [])),
+                )
+        except Exception as e:
+            logger.error("Slow loop failed: %s", e, exc_info=True)
+            await alert_system_error(
+                error=f"Weekly slow loop failed: {e}",
+                component="LearningEngine/SlowLoop",
+            )
+
     def _is_market_open(self) -> bool:
         """Check if US equity market is currently open."""
         mh = self.config.market_hours
@@ -285,4 +374,9 @@ class TradingScheduler:
             "enabled": self.config.enabled,
             "market_open": self._is_market_open(),
             "jobs": jobs,
+            "learning": {
+                "enabled": self.config.learning_enabled,
+                "fast_loop": f"daily at {self.config.fast_loop_hour:02d}:{self.config.fast_loop_minute:02d} ET",
+                "slow_loop": f"{self.config.slow_loop_day} at {self.config.slow_loop_hour:02d}:{self.config.slow_loop_minute:02d} ET",
+            },
         }

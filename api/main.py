@@ -26,13 +26,19 @@ from data.database import engine, async_session_factory
 from data.repositories.trades import get_recent_trades
 from data.repositories.portfolio import get_latest_snapshot
 from data.repositories.risk_events import get_recent_risk_events
+from data.repositories.strategies import get_strategy_performance
 from engines.execution.base import Executor
+from engines.execution.shadow import ShadowExecutor
 from engines.models import AssetClass
+from engines.recovery import HealthMonitor
 from engines.risk.engine import RiskEngine
 from engines.scheduler import TradingScheduler
 from engines.strategy.crypto.trend_following import TrendFollowingStrategy
+from engines.strategy.crypto.volatility_harvest import VolatilityHarvestStrategy
+from engines.strategy.equities.mean_reversion import MeanReversionStrategy
 from engines.strategy.equities.momentum import MomentumStrategy
 from engines.strategy.equities.sma_crossover import SMACrossoverStrategy
+from engines.strategy.predictions.news_driven import NewsDrivenStrategy
 from engines.strategy.predictions.value_pricing import ValuePricingStrategy
 
 logger = logging.getLogger(__name__)
@@ -51,6 +57,10 @@ def _build_strategies() -> list:
     momentum.activate()
     strategies.append(momentum)
 
+    mean_rev = MeanReversionStrategy()
+    mean_rev.activate()
+    strategies.append(mean_rev)
+
     # --- Crypto ---
     trend_btc = TrendFollowingStrategy()
     trend_btc.activate()
@@ -63,10 +73,18 @@ def _build_strategies() -> list:
     trend_eth.activate()
     strategies.append(trend_eth)
 
+    vol_harvest = VolatilityHarvestStrategy()
+    vol_harvest.activate()
+    strategies.append(vol_harvest)
+
     # --- Predictions ---
     value_kalshi = ValuePricingStrategy()
     value_kalshi.activate()
     strategies.append(value_kalshi)
+
+    news_kalshi = NewsDrivenStrategy()
+    news_kalshi.activate()
+    strategies.append(news_kalshi)
 
     return strategies
 
@@ -136,8 +154,25 @@ async def lifespan(app: FastAPI):
 
     # Build engines
     risk_engine = RiskEngine(RiskConfig())
-    executor = _build_executor()
+    real_executor = _build_executor()
     strategies = _build_strategies()
+
+    # Shadow mode: wrap executor if SHADOW_MODE=true
+    shadow_mode = os.getenv("SHADOW_MODE", "").lower() in ("true", "1", "yes")
+    shadow_executor = None
+
+    if shadow_mode:
+        shadow_executor = ShadowExecutor(
+            real_executor=real_executor,
+            max_divergence_pct=float(os.getenv("SHADOW_MAX_DIVERGENCE_PCT", "2.0")),
+            auto_pause_on_divergence=True,
+        )
+        # Pipeline uses shadow executor (returns paper results, runs live at min size)
+        executor = shadow_executor
+        logger.info("Shadow mode ENABLED (max divergence: %.1f%%)", shadow_executor.max_divergence_pct)
+    else:
+        executor = real_executor
+        logger.info("Shadow mode disabled — using standard executor")
 
     # Build and start scheduler
     scheduler_config = SchedulerConfig()
@@ -149,16 +184,28 @@ async def lifespan(app: FastAPI):
     )
     scheduler.start()
 
+    # Health monitor for graceful degradation
+    health_monitor = HealthMonitor()
+    health_monitor.register("database", max_failures=3, backoff_seconds=30)
+    health_monitor.register("alpaca", max_failures=5, backoff_seconds=60)
+    health_monitor.register("coinbase", max_failures=5, backoff_seconds=60)
+    health_monitor.register("kalshi", max_failures=5, backoff_seconds=60)
+    health_monitor.register("scheduler", max_failures=3, backoff_seconds=15)
+
     # Store references for endpoints
     app.state.risk_engine = risk_engine
     app.state.executor = executor
+    app.state.shadow_executor = shadow_executor
+    app.state.shadow_mode = shadow_mode
     app.state.scheduler = scheduler
     app.state.strategies = strategies
+    app.state.health_monitor = health_monitor
 
     logger.info(
-        "Sentinel started: %d strategies, scheduler %s",
+        "Sentinel started: %d strategies, scheduler %s, shadow %s",
         len(strategies),
         "enabled" if scheduler_config.enabled else "disabled",
+        "ON" if shadow_mode else "OFF",
     )
 
     yield
@@ -193,12 +240,13 @@ async def health_check():
     Returns system status, uptime, engine states, and scheduler info.
     """
     scheduler: TradingScheduler = app.state.scheduler
-    return {
+    result = {
         "status": "ok",
         "timestamp": datetime.utcnow().isoformat(),
         "started_at": getattr(app.state, "started_at", None),
         "strategies": len(getattr(app.state, "strategies", [])),
         "scheduler": scheduler.status(),
+        "shadow_mode": getattr(app.state, "shadow_mode", False),
         "connections": {
             "database": (
                 "connected"
@@ -207,6 +255,9 @@ async def health_check():
             ),
         },
     }
+    if app.state.shadow_mode and app.state.shadow_executor:
+        result["shadow_stats"] = app.state.shadow_executor.stats.summary()
+    return result
 
 
 @app.post("/emergency-stop")
@@ -313,6 +364,126 @@ async def get_strategies():
             }
             for s in strategies
         ],
+    }
+
+
+@app.get("/risk-events")
+async def get_risk_events_endpoint(limit: int = 20):
+    """Get recent risk events."""
+    async with async_session_factory() as session:
+        events = await get_recent_risk_events(session, limit=limit)
+        return {
+            "events": [
+                {
+                    "id": e.id,
+                    "event_type": e.event_type,
+                    "severity": e.severity,
+                    "details": e.details,
+                    "portfolio_value": e.portfolio_value_at_event,
+                    "action_taken": e.action_taken,
+                    "created_at": e.created_at.isoformat() if e.created_at else None,
+                }
+                for e in events
+            ],
+            "count": len(events),
+        }
+
+
+@app.get("/performance")
+async def get_performance(strategy_id: str, limit: int = 30):
+    """Get performance history for a strategy."""
+    async with async_session_factory() as session:
+        records = await get_strategy_performance(session, strategy_id, limit=limit)
+        return {
+            "strategy_id": strategy_id,
+            "records": [
+                {
+                    "date": r.date.isoformat() if r.date else None,
+                    "trades_count": r.trades_count,
+                    "win_rate": r.win_rate,
+                    "total_pnl": r.total_pnl,
+                    "sharpe_ratio": r.sharpe_ratio,
+                    "max_drawdown": r.max_drawdown,
+                    "risk_budget_used": r.risk_budget_used,
+                }
+                for r in records
+            ],
+            "count": len(records),
+        }
+
+
+@app.get("/learning")
+async def get_learning_status():
+    """Get learning engine status and recent activity."""
+    scheduler: TradingScheduler = app.state.scheduler
+    status = scheduler.status()
+    return {
+        "learning": status.get("learning", {}),
+        "scheduler_running": status.get("running", False),
+    }
+
+
+@app.get("/shadow")
+async def get_shadow_status():
+    """Get shadow mode status and divergence stats."""
+    if not app.state.shadow_mode:
+        return {"shadow_mode": False, "message": "Shadow mode is not enabled. Set SHADOW_MODE=true to enable."}
+
+    shadow: ShadowExecutor = app.state.shadow_executor
+    return {
+        "shadow_mode": True,
+        **shadow.status(),
+    }
+
+
+@app.post("/shadow/pause")
+async def pause_shadow_live():
+    """Pause live trading in shadow mode (paper continues)."""
+    if not app.state.shadow_mode or not app.state.shadow_executor:
+        return {"error": "Shadow mode not enabled"}
+    app.state.shadow_executor._live_paused = True
+    return {"status": "live_paused", "message": "Live shadow trades paused. Paper continues."}
+
+
+@app.post("/shadow/resume")
+async def resume_shadow_live():
+    """Resume live trading in shadow mode."""
+    if not app.state.shadow_mode or not app.state.shadow_executor:
+        return {"error": "Shadow mode not enabled"}
+    app.state.shadow_executor.resume_live()
+    return {"status": "live_resumed"}
+
+
+@app.post("/shadow/reset")
+async def reset_shadow_stats():
+    """Reset shadow mode statistics."""
+    if not app.state.shadow_mode or not app.state.shadow_executor:
+        return {"error": "Shadow mode not enabled"}
+    app.state.shadow_executor.reset_stats()
+    return {"status": "stats_reset"}
+
+
+@app.get("/system-health")
+async def get_system_health():
+    """Get detailed system health with recovery status."""
+    monitor: HealthMonitor = app.state.health_monitor
+    scheduler: TradingScheduler = app.state.scheduler
+
+    # Check DB health
+    try:
+        async with async_session_factory() as session:
+            from sqlalchemy import text
+            await session.execute(text("SELECT 1"))
+        await monitor.record_success("database")
+    except Exception as e:
+        await monitor.record_failure("database", str(e))
+
+    return {
+        "health": monitor.system_status(),
+        "scheduler": scheduler.status(),
+        "risk_engine": {
+            "circuit_breaker_active": app.state.risk_engine._is_circuit_breaker_active(),
+        },
     }
 
 

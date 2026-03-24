@@ -86,12 +86,81 @@ export interface StrategiesData {
   strategies: StrategyInfo[];
 }
 
+export interface RiskEvent {
+  id: number;
+  event_type: string;
+  severity: string;
+  details: Record<string, unknown> | null;
+  portfolio_value: number;
+  action_taken: string;
+  created_at: string;
+}
+
+export interface RiskEventsData {
+  events: RiskEvent[];
+  count: number;
+}
+
+export interface PerformanceRecord {
+  date: string;
+  trades_count: number;
+  win_rate: number;
+  total_pnl: number;
+  sharpe_ratio: number | null;
+  max_drawdown: number;
+  risk_budget_used: number;
+}
+
+export interface PerformanceData {
+  strategy_id: string;
+  records: PerformanceRecord[];
+  count: number;
+}
+
+export interface ComponentHealthData {
+  status: string;
+  consecutive_failures: number;
+  total_failures: number;
+  last_error: string | null;
+  last_check: string | null;
+  backoff_seconds: number;
+}
+
+export interface SystemHealthData {
+  health: {
+    overall: string;
+    healthy: number;
+    total: number;
+    components: Record<string, ComponentHealthData>;
+    recent_events: Array<{
+      time: string;
+      component: string;
+      type: string;
+      details: string;
+    }>;
+  };
+  scheduler: SchedulerStatus;
+  risk_engine: { circuit_breaker_active: boolean };
+}
+
+export interface LearningData {
+  learning: {
+    enabled: boolean;
+    fast_loop: string;
+    slow_loop: string;
+  };
+  scheduler_running: boolean;
+}
+
 // --- API calls ---
 
 export const fetchHealth = () => get<HealthData>('/health');
 export const fetchPortfolio = () => get<PortfolioData>('/portfolio');
 export const fetchTrades = (limit = 20) => get<TradesData>(`/trades?limit=${limit}`);
 export const fetchStrategies = () => get<StrategiesData>('/strategies');
+export const fetchRiskEvents = (limit = 10) => get<RiskEventsData>(`/risk-events?limit=${limit}`);
+export const fetchSystemHealth = () => get<SystemHealthData>('/system-health');
+export const fetchLearning = () => get<LearningData>('/learning');
 export const emergencyStop = () => post<unknown>('/emergency-stop');
 export const pauseAsset = (ac: string) => post<unknown>(`/scheduler/pause/${ac}`);
 export const resumeAsset = (ac: string) => post<unknown>(`/scheduler/resume/${ac}`);

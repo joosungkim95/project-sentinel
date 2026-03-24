@@ -172,5 +172,18 @@ class RiskContext(BaseModel):
     circuit_breaker_history: list[dict]
 
 
+class LearningContext(BaseModel):
+    """Context assembled for the weekly learning review loop."""
+    strategy_performances: list[StrategyPerformance]
+    market_regime_history: list[dict]
+    parameter_change_history: list[dict]
+    strategy_graveyard: list[dict]
+    portfolio_snapshot: PortfolioSnapshot
+    total_pnl_period: float
+    best_trade: Optional[dict] = None
+    worst_trade: Optional[dict] = None
+    period_days: int = 7
+
+
 # Allow forward references
 PortfolioSnapshot.model_rebuild()

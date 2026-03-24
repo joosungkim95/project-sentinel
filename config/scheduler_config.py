@@ -42,6 +42,32 @@ class SchedulerConfig(BaseModel):
         description="Skip equity cycles outside market hours.",
     )
 
+    # Learning Engine
+    fast_loop_hour: int = Field(
+        default=17,
+        description="Hour (ET) to run daily fast loop. Default: 5pm after market close.",
+    )
+    fast_loop_minute: int = Field(
+        default=0,
+        description="Minute to run daily fast loop.",
+    )
+    slow_loop_day: str = Field(
+        default="sun",
+        description="Day of week for weekly slow loop (mon-sun).",
+    )
+    slow_loop_hour: int = Field(
+        default=20,
+        description="Hour (ET) to run weekly slow loop. Default: 8pm Sunday.",
+    )
+    slow_loop_minute: int = Field(
+        default=0,
+        description="Minute to run weekly slow loop.",
+    )
+    learning_enabled: bool = Field(
+        default=True,
+        description="Enable learning engine loops.",
+    )
+
     # Safety
     max_consecutive_errors: int = Field(
         default=5,
