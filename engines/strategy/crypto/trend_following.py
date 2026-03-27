@@ -1,25 +1,27 @@
 """
 Trend Following Strategy — EMA crossover + ADX for crypto.
 
+CORE tier: multi-symbol trend detection on 4-hour bars.
+
 Captures sustained trends in crypto markets by combining:
 1. EMA Crossover — fast/slow exponential MA for direction
 2. ADX (Average Directional Index) — confirms trend strength
 3. ATR (Average True Range) — sets dynamic stop-loss distance
 
 Signal logic:
-- BUY: Fast EMA > Slow EMA AND ADX > 25 AND price > Fast EMA
-- SELL: Fast EMA < Slow EMA OR ADX < 20 (trend fading)
+- BUY: Fast EMA > Slow EMA AND ADX > 20 AND price > Fast EMA
+- SELL: Fast EMA < Slow EMA OR ADX < 15 (trend fading)
 
 Uses EMAs instead of SMAs because crypto is more volatile and
 EMAs react faster to price changes.
 
 Default parameters:
-- symbol: BTC-USD
+- symbols: BTC-USD, ETH-USD, SOL-USD
 - fast_ema: 12 (bars)
 - slow_ema: 26 (bars)
 - adx_period: 14
-- adx_trend_threshold: 25
-- adx_fade_threshold: 20
+- adx_trend_threshold: 20
+- adx_fade_threshold: 15
 """
 
 import logging
@@ -27,6 +29,8 @@ from typing import Any
 
 import numpy as np
 
+from config.symbols import CRYPTO_TREND_SYMBOLS
+from config.tiers import StrategyTier
 from engines.models import (
     AssetClass,
     MarketRegime,
@@ -52,16 +56,15 @@ class TrendFollowingStrategy(Strategy):
 
     def __init__(
         self,
-        strategy_id: str = "trend_btc",
+        strategy_id: str = "trend_crypto",
         parameters: dict[str, Any] | None = None,
     ):
         default_params = {
-            "symbol": "BTC-USD",
             "fast_ema_period": 12,
             "slow_ema_period": 26,
             "adx_period": 14,
-            "adx_trend_threshold": 25.0,  # ADX above = trending
-            "adx_fade_threshold": 20.0,   # ADX below = trend fading
+            "adx_trend_threshold": 20.0,  # ADX above = trending (was 25)
+            "adx_fade_threshold": 15.0,   # ADX below = trend fading (was 20)
             "atr_period": 14,
             "atr_stop_multiplier": 2.0,   # Stop-loss = ATR * multiplier
             "position_size_usd": 200.0,   # Smaller for crypto volatility
@@ -73,37 +76,60 @@ class TrendFollowingStrategy(Strategy):
             strategy_id=strategy_id,
             asset_class=AssetClass.CRYPTO,
             parameters=default_params,
+            tier=StrategyTier.CORE,
+            symbols=CRYPTO_TREND_SYMBOLS,
+            timeframe="4Hour",
+            max_signals_per_cycle=2,
         )
 
     async def generate_signals(
         self,
-        market_data: dict[str, Any],
+        bars: dict[str, list[dict]],
         market_regime: MarketRegime,
     ) -> list[Signal]:
         """
-        Generate signals from trend indicators.
+        Generate signals from trend indicators across all symbols.
 
         Args:
-            market_data: Must contain 'bars' with OHLCV data.
+            bars: Bar data keyed by symbol, each value a list of OHLCV dicts.
             market_regime: Current market regime classification.
 
         Returns:
-            List with 0 or 1 Signal.
+            List of Signal objects (may be empty if no opportunities).
         """
-        bars = market_data.get("bars", [])
-        min_bars = self.parameters["slow_ema_period"] + self.parameters["adx_period"] + 2
+        all_signals: list[Signal] = []
 
-        if len(bars) < min_bars:
+        for symbol, symbol_bars in bars.items():
+            signals = self._analyze_symbol(symbol, symbol_bars, market_regime)
+            all_signals.extend(signals)
+            if len(all_signals) >= self.max_signals_per_cycle:
+                break
+
+        return all_signals[: self.max_signals_per_cycle]
+
+    def _analyze_symbol(
+        self,
+        symbol: str,
+        symbol_bars: list[dict],
+        market_regime: MarketRegime,
+    ) -> list[Signal]:
+        """Analyze a single symbol for trend signals."""
+        min_bars = (
+            self.parameters["slow_ema_period"]
+            + self.parameters["adx_period"]
+            + 2
+        )
+
+        if len(symbol_bars) < min_bars:
             logger.debug(
-                "Not enough bars for trend following: %d < %d",
-                len(bars),
-                min_bars,
+                "Not enough bars for trend following %s: %d < %d",
+                symbol, len(symbol_bars), min_bars,
             )
             return []
 
-        closes = np.array([b["close"] for b in bars])
-        highs = np.array([b["high"] for b in bars])
-        lows = np.array([b["low"] for b in bars])
+        closes = np.array([b["close"] for b in symbol_bars])
+        highs = np.array([b["high"] for b in symbol_bars])
+        lows = np.array([b["low"] for b in symbol_bars])
         current_price = closes[-1]
 
         # Calculate indicators
@@ -133,18 +159,13 @@ class TrendFollowingStrategy(Strategy):
 
         logger.debug(
             "Trend indicators for %s: FastEMA=%.2f SlowEMA=%.2f ADX=%.1f ATR=%.2f",
-            self.parameters["symbol"],
-            current_fast,
-            current_slow,
-            current_adx,
-            current_atr,
+            symbol, current_fast, current_slow, current_adx, current_atr,
         )
 
         adx_trend = self.parameters["adx_trend_threshold"]
         adx_fade = self.parameters["adx_fade_threshold"]
 
         # --- BUY signal ---
-        # Fast EMA crossed above slow EMA + ADX confirms trend + price above fast EMA
         ema_bullish = current_fast > current_slow
         ema_just_crossed = prev_fast <= prev_slow and current_fast > current_slow
         adx_trending = current_adx > adx_trend
@@ -152,27 +173,26 @@ class TrendFollowingStrategy(Strategy):
 
         if ema_bullish and adx_trending and price_above_ema:
             confidence = self._calc_buy_confidence(
-                current_fast, current_slow, current_adx, current_price, ema_just_crossed
+                current_fast, current_slow, current_adx,
+                current_price, ema_just_crossed,
             )
             quantity = self.parameters["position_size_usd"] / current_price
-            stop_loss = current_price - (current_atr * self.parameters["atr_stop_multiplier"])
+            stop_loss = current_price - (
+                current_atr * self.parameters["atr_stop_multiplier"]
+            )
 
             logger.info(
                 "Trend BUY: %s FastEMA=%.2f > SlowEMA=%.2f, ADX=%.1f, ATR=%.2f",
-                self.parameters["symbol"],
-                current_fast,
-                current_slow,
-                current_adx,
-                current_atr,
+                symbol, current_fast, current_slow, current_adx, current_atr,
             )
 
             return [
                 Signal(
                     strategy_id=self.strategy_id,
                     asset_class=self.asset_class,
-                    symbol=self.parameters["symbol"],
+                    symbol=symbol,
                     side=Side.BUY,
-                    quantity=round(quantity, 8),  # Crypto precision
+                    quantity=round(quantity, 8),
                     target_price=current_price,
                     stop_loss=round(stop_loss, 2),
                     confidence=confidence,
@@ -186,11 +206,12 @@ class TrendFollowingStrategy(Strategy):
                         f"ATR stop @ ${stop_loss:,.2f}"
                     ),
                     market_regime=market_regime,
+                    position_size_usd=self.parameters["position_size_usd"],
+                    tier=self.tier,
                 )
             ]
 
         # --- SELL signal ---
-        # Fast EMA crosses below slow EMA OR ADX fades below threshold
         ema_bearish_cross = prev_fast >= prev_slow and current_fast < current_slow
         adx_fading = current_adx < adx_fade
 
@@ -204,20 +225,18 @@ class TrendFollowingStrategy(Strategy):
                 sell_reasons.append(f"ADX fading: {current_adx:.1f} < {adx_fade}")
 
             confidence = self._calc_sell_confidence(
-                current_fast, current_slow, current_adx, ema_bearish_cross
+                current_fast, current_slow, current_adx, ema_bearish_cross,
             )
 
             logger.info(
-                "Trend SELL: %s %s",
-                self.parameters["symbol"],
-                "; ".join(sell_reasons),
+                "Trend SELL: %s %s", symbol, "; ".join(sell_reasons),
             )
 
             return [
                 Signal(
                     strategy_id=self.strategy_id,
                     asset_class=self.asset_class,
-                    symbol=self.parameters["symbol"],
+                    symbol=symbol,
                     side=Side.SELL,
                     quantity=0,  # Sell entire position
                     target_price=current_price,
@@ -225,6 +244,8 @@ class TrendFollowingStrategy(Strategy):
                     strength=self._classify_strength(confidence),
                     rationale=f"Trend SELL: {'; '.join(sell_reasons)}",
                     market_regime=market_regime,
+                    position_size_usd=self.parameters["position_size_usd"],
+                    tier=self.tier,
                 )
             ]
 
@@ -274,8 +295,8 @@ class TrendFollowingStrategy(Strategy):
         Calculate Average Directional Index.
 
         ADX measures trend strength (not direction):
-        - > 25: trending
-        - < 20: ranging/weak
+        - > 20: trending
+        - < 15: ranging/weak
         - > 40: strong trend
 
         Uses Wilder's smoothing method.
@@ -309,7 +330,11 @@ class TrendFollowingStrategy(Strategy):
             smoothed = np.zeros(len(data) - period + 1)
             smoothed[0] = np.sum(data[:period])
             for i in range(1, len(smoothed)):
-                smoothed[i] = smoothed[i - 1] - (smoothed[i - 1] / period) + data[period - 1 + i]
+                smoothed[i] = (
+                    smoothed[i - 1]
+                    - (smoothed[i - 1] / period)
+                    + data[period - 1 + i]
+                )
             return smoothed
 
         atr_smooth = wilder_smooth(tr, period)
@@ -318,25 +343,19 @@ class TrendFollowingStrategy(Strategy):
 
         # Directional Indicators
         plus_di = np.divide(
-            plus_dm_smooth * 100,
-            atr_smooth,
-            out=np.zeros_like(atr_smooth),
-            where=atr_smooth != 0,
+            plus_dm_smooth * 100, atr_smooth,
+            out=np.zeros_like(atr_smooth), where=atr_smooth != 0,
         )
         minus_di = np.divide(
-            minus_dm_smooth * 100,
-            atr_smooth,
-            out=np.zeros_like(atr_smooth),
-            where=atr_smooth != 0,
+            minus_dm_smooth * 100, atr_smooth,
+            out=np.zeros_like(atr_smooth), where=atr_smooth != 0,
         )
 
         # DX
         di_sum = plus_di + minus_di
         dx = np.divide(
-            np.abs(plus_di - minus_di) * 100,
-            di_sum,
-            out=np.zeros_like(di_sum),
-            where=di_sum != 0,
+            np.abs(plus_di - minus_di) * 100, di_sum,
+            out=np.zeros_like(di_sum), where=di_sum != 0,
         )
 
         # ADX = Wilder smoothed DX
@@ -391,21 +410,21 @@ class TrendFollowingStrategy(Strategy):
         just_crossed: bool,
     ) -> float:
         """Calculate buy confidence from trend indicators."""
-        # EMA spread (0–0.3): wider spread = stronger trend
+        # EMA spread (0-0.3): wider spread = stronger trend
         if slow_ema > 0:
             spread_pct = abs(fast_ema - slow_ema) / slow_ema * 100
         else:
             spread_pct = 0.0
         ema_score = min(spread_pct / 5.0, 0.3)
 
-        # ADX contribution (0–0.4): stronger trend = higher
-        adx_score = min((adx - 20.0) / 40.0, 0.4)
+        # ADX contribution (0-0.4): stronger trend = higher
+        adx_score = min((adx - 15.0) / 40.0, 0.4)
         adx_score = max(adx_score, 0.0)
 
         # Fresh crossover bonus (0 or 0.15)
         cross_bonus = 0.15 if just_crossed else 0.0
 
-        # Price above EMA bonus (0–0.15)
+        # Price above EMA bonus (0-0.15)
         if fast_ema > 0:
             above_pct = (price - fast_ema) / fast_ema * 100
         else:
@@ -425,7 +444,7 @@ class TrendFollowingStrategy(Strategy):
     ) -> float:
         """Calculate sell confidence from bearish indicators."""
         cross_score = 0.4 if bearish_cross else 0.1
-        adx_score = max((25.0 - adx) / 25.0, 0.0) * 0.4
+        adx_score = max((20.0 - adx) / 20.0, 0.0) * 0.4
         if slow_ema > 0:
             spread = abs(fast_ema - slow_ema) / slow_ema * 100
         else:

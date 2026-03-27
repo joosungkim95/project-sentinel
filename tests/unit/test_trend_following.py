@@ -112,7 +112,7 @@ class TestADXCalculation:
         closes = np.array([b["close"] for b in bars])
         adx = TrendFollowingStrategy._calc_adx(highs, lows, closes, period=14)
         assert adx is not None
-        # Strong trend should produce ADX > 25
+        # Strong trend should produce ADX > 20
         assert adx[-1] > 20.0
 
     def test_adx_ranging_market(self):
@@ -173,7 +173,7 @@ class TestBuySignal:
         strategy = TrendFollowingStrategy()
         bars = _strong_uptrend_bars(n=80)
         signals = await strategy.generate_signals(
-            market_data={"bars": bars},
+            bars={"BTC-USD": bars},
             market_regime=MarketRegime.TRENDING_UP,
         )
         if signals:
@@ -188,7 +188,7 @@ class TestBuySignal:
         strategy = TrendFollowingStrategy()
         bars = _ranging_bars(n=80)
         signals = await strategy.generate_signals(
-            market_data={"bars": bars},
+            bars={"BTC-USD": bars},
             market_regime=MarketRegime.RANGING,
         )
         # In a ranging market, either no signal or a sell (trend fading)
@@ -200,7 +200,7 @@ class TestBuySignal:
         strategy = TrendFollowingStrategy()
         bars = _make_bars([50000.0, 50100.0, 50200.0])
         signals = await strategy.generate_signals(
-            market_data={"bars": bars},
+            bars={"BTC-USD": bars},
             market_regime=MarketRegime.UNKNOWN,
         )
         assert len(signals) == 0
@@ -214,7 +214,7 @@ class TestSellSignal:
         strategy = TrendFollowingStrategy()
         bars = _strong_downtrend_bars(n=80)
         signals = await strategy.generate_signals(
-            market_data={"bars": bars},
+            bars={"BTC-USD": bars},
             market_regime=MarketRegime.TRENDING_DOWN,
         )
         if signals:
@@ -256,18 +256,21 @@ class TestStrategyConfig:
 
     def test_default_params(self):
         strategy = TrendFollowingStrategy()
-        assert strategy.strategy_id == "trend_btc"
+        assert strategy.strategy_id == "trend_crypto"
         assert strategy.asset_class == AssetClass.CRYPTO
-        assert strategy.parameters["symbol"] == "BTC-USD"
         assert strategy.parameters["fast_ema_period"] == 12
         assert strategy.parameters["slow_ema_period"] == 26
+        assert strategy.parameters["adx_trend_threshold"] == 20.0
+        assert strategy.parameters["adx_fade_threshold"] == 15.0
+        assert strategy.symbols == ["BTC-USD", "ETH-USD", "SOL-USD"]
+        assert strategy.timeframe == "4Hour"
+        assert strategy.max_signals_per_cycle == 2
 
     def test_custom_params(self):
         strategy = TrendFollowingStrategy(
             strategy_id="trend_eth",
-            parameters={"symbol": "ETH-USD", "position_size_usd": 100.0},
+            parameters={"position_size_usd": 100.0},
         )
-        assert strategy.parameters["symbol"] == "ETH-USD"
         assert strategy.parameters["position_size_usd"] == 100.0
         # Defaults preserved
         assert strategy.parameters["adx_period"] == 14
@@ -276,7 +279,19 @@ class TestStrategyConfig:
     async def test_empty_market_data(self):
         strategy = TrendFollowingStrategy()
         signals = await strategy.generate_signals(
-            market_data={},
+            bars={},
             market_regime=MarketRegime.UNKNOWN,
         )
         assert signals == []
+
+    @pytest.mark.asyncio
+    async def test_multi_symbol(self):
+        """Should process multiple symbols."""
+        strategy = TrendFollowingStrategy()
+        bars = _strong_uptrend_bars(n=80)
+        signals = await strategy.generate_signals(
+            bars={"BTC-USD": bars, "ETH-USD": bars},
+            market_regime=MarketRegime.TRENDING_UP,
+        )
+        # At most max_signals_per_cycle
+        assert len(signals) <= strategy.max_signals_per_cycle

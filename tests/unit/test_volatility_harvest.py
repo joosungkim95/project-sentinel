@@ -93,24 +93,26 @@ class TestATR:
 
 class TestBuySignal:
 
+    @pytest.mark.asyncio
     async def test_buy_after_vol_crush(self):
         """Generates BUY after volatility spike followed by crush."""
         strategy = VolatilityHarvestStrategy()
         bars = make_vol_spike_then_crush()
         signals = await strategy.generate_signals(
-            {"bars": bars}, MarketRegime.HIGH_VOLATILITY
+            {"BTC-USD": bars}, MarketRegime.HIGH_VOLATILITY
         )
         buys = [s for s in signals if s.side == Side.BUY]
         # May or may not trigger depending on exact thresholds
         # The pattern is designed to trigger, but floating point...
         assert isinstance(signals, list)
 
+    @pytest.mark.asyncio
     async def test_no_signal_calm_market(self):
         """No signal in consistently calm conditions."""
         strategy = VolatilityHarvestStrategy()
         bars = make_calm_bars()
         signals = await strategy.generate_signals(
-            {"bars": bars}, MarketRegime.RANGING
+            {"BTC-USD": bars}, MarketRegime.RANGING
         )
         buys = [s for s in signals if s.side == Side.BUY]
         assert len(buys) == 0
@@ -118,12 +120,13 @@ class TestBuySignal:
 
 class TestSellSignal:
 
+    @pytest.mark.asyncio
     async def test_sell_on_expanding_vol(self):
         """Generates SELL when vol is expanding."""
         strategy = VolatilityHarvestStrategy()
         bars = make_expanding_vol()
         signals = await strategy.generate_signals(
-            {"bars": bars}, MarketRegime.HIGH_VOLATILITY
+            {"BTC-USD": bars}, MarketRegime.HIGH_VOLATILITY
         )
         sells = [s for s in signals if s.side == Side.SELL]
         assert isinstance(signals, list)
@@ -145,25 +148,34 @@ class TestStrategyConfig:
 
     def test_default_params(self):
         s = VolatilityHarvestStrategy()
-        assert s.parameters["symbol"] == "BTC-USD"
+        assert s.strategy_id == "vol_harvest_crypto"
         assert s.asset_class.value == "crypto"
+        assert s.parameters["vol_spike_threshold"] == 1.3
+        assert s.parameters["vol_crush_threshold"] == 0.85
+        assert s.parameters["atr_decline_pct"] == 15.0
+        assert s.parameters["position_size_usd"] == 600.0
+        assert s.symbols == ["BTC-USD", "ETH-USD"]
+        assert s.timeframe == "1Day"
+        assert s.max_signals_per_cycle == 1
 
     def test_custom_params(self):
         s = VolatilityHarvestStrategy(
             strategy_id="vol_harvest_eth",
-            parameters={"symbol": "ETH-USD", "position_size_usd": 100.0},
+            parameters={"position_size_usd": 100.0},
         )
-        assert s.parameters["symbol"] == "ETH-USD"
+        assert s.parameters["position_size_usd"] == 100.0
 
+    @pytest.mark.asyncio
     async def test_empty_market_data(self):
         s = VolatilityHarvestStrategy()
         signals = await s.generate_signals({}, MarketRegime.RANGING)
         assert signals == []
 
+    @pytest.mark.asyncio
     async def test_insufficient_bars(self):
         s = VolatilityHarvestStrategy()
         signals = await s.generate_signals(
-            {"bars": [{"close": 40000, "high": 40100, "low": 39900, "volume": 5000}]},
+            {"BTC-USD": [{"close": 40000, "high": 40100, "low": 39900, "volume": 5000}]},
             MarketRegime.RANGING,
         )
         assert signals == []

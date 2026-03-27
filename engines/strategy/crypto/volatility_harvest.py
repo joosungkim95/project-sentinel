@@ -1,6 +1,8 @@
 """
 Volatility Harvesting Strategy — Sells volatility in crypto markets.
 
+SNIPER tier: rare, high-conviction entries on daily bars.
+
 Exploits the tendency of crypto volatility to spike and then contract.
 When volatility is extremely high, this strategy enters positions
 expecting a return to normal volatility levels.
@@ -16,12 +18,12 @@ period of compression that benefits from entering mean-reversion
 positions at reduced-vol prices.
 
 Default parameters:
-- symbol: BTC-USD
+- symbols: BTC-USD, ETH-USD
 - bb_period: 20
 - bb_std: 2.0
 - atr_period: 14
-- vol_spike_threshold: 1.5 (BB width must be 1.5x its 20-period average)
-- vol_crush_threshold: 0.8 (BB width must contract to 0.8x average)
+- vol_spike_threshold: 1.3 (BB width must be 1.3x its 20-period average)
+- vol_crush_threshold: 0.85 (BB width must contract to 0.85x average)
 """
 
 import logging
@@ -29,6 +31,8 @@ from typing import Any
 
 import numpy as np
 
+from config.symbols import CRYPTO_SNIPER_SYMBOLS
+from config.tiers import StrategyTier
 from engines.models import (
     AssetClass,
     MarketRegime,
@@ -53,18 +57,17 @@ class VolatilityHarvestStrategy(Strategy):
 
     def __init__(
         self,
-        strategy_id: str = "vol_harvest_btc",
+        strategy_id: str = "vol_harvest_crypto",
         parameters: dict[str, Any] | None = None,
     ):
         default_params = {
-            "symbol": "BTC-USD",
             "bb_period": 20,
             "bb_std": 2.0,
             "atr_period": 14,
-            "vol_spike_threshold": 1.5,    # Width must have been 1.5x avg
-            "vol_crush_threshold": 0.8,    # Width must now be 0.8x avg
-            "atr_decline_pct": 20.0,       # ATR must have declined 20% from peak
-            "position_size_usd": 150.0,
+            "vol_spike_threshold": 1.3,    # Width must have been 1.3x avg (was 1.5)
+            "vol_crush_threshold": 0.85,   # Width must now be 0.85x avg (was 0.8)
+            "atr_decline_pct": 15.0,       # ATR must have declined 15% from peak (was 20)
+            "position_size_usd": 600.0,
             "stop_loss_atr_mult": 2.5,     # Wide stops for crypto
         }
         if parameters:
@@ -74,32 +77,53 @@ class VolatilityHarvestStrategy(Strategy):
             strategy_id=strategy_id,
             asset_class=AssetClass.CRYPTO,
             parameters=default_params,
+            tier=StrategyTier.SNIPER,
+            symbols=CRYPTO_SNIPER_SYMBOLS,
+            timeframe="1Day",
+            max_signals_per_cycle=1,
         )
 
     async def generate_signals(
         self,
-        market_data: dict[str, Any],
+        bars: dict[str, list[dict]],
         market_regime: MarketRegime,
     ) -> list[Signal]:
         """
         Generate signals based on volatility contraction patterns.
 
-        Looks for the sequence: vol spike → vol crush → enter position.
+        Looks for the sequence: vol spike -> vol crush -> enter position.
+        Iterates across all symbols, returning at most max_signals_per_cycle.
         """
-        bars = market_data.get("bars", [])
+        all_signals: list[Signal] = []
+
+        for symbol, symbol_bars in bars.items():
+            signals = self._analyze_symbol(symbol, symbol_bars, market_regime)
+            all_signals.extend(signals)
+            if len(all_signals) >= self.max_signals_per_cycle:
+                break
+
+        return all_signals[: self.max_signals_per_cycle]
+
+    def _analyze_symbol(
+        self,
+        symbol: str,
+        symbol_bars: list[dict],
+        market_regime: MarketRegime,
+    ) -> list[Signal]:
+        """Analyze a single symbol for volatility harvest signals."""
         lookback = self.parameters["bb_period"] + 20  # Need extra for vol avg
 
-        if len(bars) < lookback:
+        if len(symbol_bars) < lookback:
             return []
 
-        closes = np.array([b["close"] for b in bars])
-        highs = np.array([b["high"] for b in bars])
-        lows = np.array([b["low"] for b in bars])
+        closes = np.array([b["close"] for b in symbol_bars])
+        highs = np.array([b["high"] for b in symbol_bars])
+        lows = np.array([b["low"] for b in symbol_bars])
         current_price = closes[-1]
 
         # Calculate indicators
         bb_width = self._calc_bb_width(
-            closes, self.parameters["bb_period"], self.parameters["bb_std"]
+            closes, self.parameters["bb_period"], self.parameters["bb_std"],
         )
         atr = self._calc_atr(highs, lows, closes, self.parameters["atr_period"])
 
@@ -117,12 +141,13 @@ class VolatilityHarvestStrategy(Strategy):
         recent_peak_atr = max(atr[-20:]) if len(atr) >= 20 else max(atr)
         atr_decline = (
             (recent_peak_atr - current_atr) / recent_peak_atr * 100
-            if recent_peak_atr > 0 else 0
+            if recent_peak_atr > 0
+            else 0
         )
 
         logger.debug(
             "VolHarvest %s: width_ratio=%.2f peak_ratio=%.2f atr_decline=%.1f%%",
-            self.parameters["symbol"], width_ratio, peak_ratio, atr_decline,
+            symbol, width_ratio, peak_ratio, atr_decline,
         )
 
         spike_thresh = self.parameters["vol_spike_threshold"]
@@ -136,7 +161,7 @@ class VolatilityHarvestStrategy(Strategy):
 
         if had_spike and now_crushed and atr_calming:
             confidence = self._calc_confidence(
-                width_ratio, peak_ratio, atr_decline
+                width_ratio, peak_ratio, atr_decline,
             )
             quantity = self.parameters["position_size_usd"] / current_price
             stop = current_price - (
@@ -147,7 +172,7 @@ class VolatilityHarvestStrategy(Strategy):
                 Signal(
                     strategy_id=self.strategy_id,
                     asset_class=self.asset_class,
-                    symbol=self.parameters["symbol"],
+                    symbol=symbol,
                     side=Side.BUY,
                     quantity=round(quantity, 8),
                     target_price=current_price,
@@ -161,6 +186,8 @@ class VolatilityHarvestStrategy(Strategy):
                         f"Expecting mean reversion in calmer conditions."
                     ),
                     market_regime=market_regime,
+                    position_size_usd=self.parameters["position_size_usd"],
+                    tier=self.tier,
                 )
             ]
 
@@ -170,7 +197,7 @@ class VolatilityHarvestStrategy(Strategy):
                 Signal(
                     strategy_id=self.strategy_id,
                     asset_class=self.asset_class,
-                    symbol=self.parameters["symbol"],
+                    symbol=symbol,
                     side=Side.SELL,
                     quantity=0,
                     target_price=current_price,
@@ -182,12 +209,15 @@ class VolatilityHarvestStrategy(Strategy):
                         f"New volatility expansion detected."
                     ),
                     market_regime=market_regime,
+                    position_size_usd=self.parameters["position_size_usd"],
+                    tier=self.tier,
                 )
             ]
 
         return []
 
     async def get_performance(self, period_days: int) -> StrategyPerformance:
+        """Calculate performance metrics. TODO: implement with DB."""
         return StrategyPerformance(
             strategy_id=self.strategy_id,
             period_days=period_days,
@@ -201,7 +231,7 @@ class VolatilityHarvestStrategy(Strategy):
 
     @staticmethod
     def _calc_bb_width(
-        prices: np.ndarray, period: int, num_std: float
+        prices: np.ndarray, period: int, num_std: float,
     ) -> np.ndarray | None:
         """Calculate Bollinger Band width (upper - lower) / middle."""
         if len(prices) < period:
@@ -209,7 +239,7 @@ class VolatilityHarvestStrategy(Strategy):
 
         widths = []
         for i in range(period, len(prices) + 1):
-            window = prices[i - period:i]
+            window = prices[i - period : i]
             middle = np.mean(window)
             std = np.std(window)
             if middle > 0:
@@ -222,7 +252,7 @@ class VolatilityHarvestStrategy(Strategy):
 
     @staticmethod
     def _calc_atr(
-        highs: np.ndarray, lows: np.ndarray, closes: np.ndarray, period: int
+        highs: np.ndarray, lows: np.ndarray, closes: np.ndarray, period: int,
     ) -> np.ndarray | None:
         """Calculate Average True Range."""
         n = len(closes)
@@ -246,14 +276,14 @@ class VolatilityHarvestStrategy(Strategy):
 
     @staticmethod
     def _calc_confidence(
-        width_ratio: float, peak_ratio: float, atr_decline: float
+        width_ratio: float, peak_ratio: float, atr_decline: float,
     ) -> float:
         """Confidence based on how clear the vol crush pattern is."""
-        # Bigger crush = more confident (0–0.4)
+        # Bigger crush = more confident (0-0.4)
         crush_score = min(max(1.0 - width_ratio, 0) * 2, 0.4)
-        # Bigger prior spike = clearer pattern (0–0.3)
+        # Bigger prior spike = clearer pattern (0-0.3)
         spike_score = min(max(peak_ratio - 1.0, 0) / 2, 0.3)
-        # Bigger ATR decline = more confirmation (0–0.3)
+        # Bigger ATR decline = more confirmation (0-0.3)
         atr_score = min(atr_decline / 100, 0.3)
 
         confidence = crush_score + spike_score + atr_score
@@ -261,6 +291,7 @@ class VolatilityHarvestStrategy(Strategy):
 
     @staticmethod
     def _classify_strength(confidence: float) -> SignalStrength:
+        """Map confidence to signal strength."""
         if confidence >= 0.8:
             return SignalStrength.STRONG
         elif confidence >= 0.6:
