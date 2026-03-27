@@ -1,8 +1,11 @@
 """
 Unit tests for News-Driven prediction market strategy.
+
+Updated for new bar-based signature (bars dict with "markets" key).
 """
 
 import pytest
+from config.tiers import StrategyTier
 from engines.models import MarketRegime, Side
 from engines.strategy.predictions.news_driven import NewsDrivenStrategy
 
@@ -115,16 +118,18 @@ class TestMarketEvaluation:
 
 class TestSignalGeneration:
 
+    @pytest.mark.asyncio
     async def test_generates_signal_for_repricing(self):
         strategy = NewsDrivenStrategy()
         signals = await strategy.generate_signals(
-            {"markets": [make_repricing_market()]},
-            MarketRegime.UNKNOWN,
+            bars={"markets": [make_repricing_market()]},
+            market_regime=MarketRegime.UNKNOWN,
         )
         assert len(signals) >= 1
         assert signals[0].side == Side.BUY
         assert "News-driven" in signals[0].rationale
 
+    @pytest.mark.asyncio
     async def test_caps_at_max_signals(self):
         strategy = NewsDrivenStrategy(parameters={"max_signals": 1})
         markets = [
@@ -133,31 +138,54 @@ class TestSignalGeneration:
         ]
         markets[1]["ticker"] = "KXEVENT-24-002"
         signals = await strategy.generate_signals(
-            {"markets": markets}, MarketRegime.UNKNOWN
+            bars={"markets": markets},
+            market_regime=MarketRegime.UNKNOWN,
         )
         assert len(signals) <= 1
 
+    @pytest.mark.asyncio
     async def test_ranks_by_score(self):
         strategy = NewsDrivenStrategy(parameters={"max_signals": 2})
         big_move = make_repricing_market(price_move=0.20, volume=10000)
         small_move = make_repricing_market(price_move=0.09, volume=2000)
         small_move["ticker"] = "KXSMALL-24"
         signals = await strategy.generate_signals(
-            {"markets": [small_move, big_move]}, MarketRegime.UNKNOWN
+            bars={"markets": [small_move, big_move]},
+            market_regime=MarketRegime.UNKNOWN,
         )
         if len(signals) == 2:
             # First signal should be the bigger move
             assert signals[0].symbol == "KXEVENT-24-001"
 
+    @pytest.mark.asyncio
     async def test_no_markets_returns_empty(self):
         strategy = NewsDrivenStrategy()
-        signals = await strategy.generate_signals({"markets": []}, MarketRegime.UNKNOWN)
+        signals = await strategy.generate_signals(
+            bars={"markets": []},
+            market_regime=MarketRegime.UNKNOWN,
+        )
         assert signals == []
 
+    @pytest.mark.asyncio
     async def test_empty_data_returns_empty(self):
         strategy = NewsDrivenStrategy()
-        signals = await strategy.generate_signals({}, MarketRegime.UNKNOWN)
+        signals = await strategy.generate_signals(
+            bars={},
+            market_regime=MarketRegime.UNKNOWN,
+        )
         assert signals == []
+
+    @pytest.mark.asyncio
+    async def test_signal_includes_tier_and_position_size(self):
+        """Signals must include SNIPER tier and position_size_usd."""
+        strategy = NewsDrivenStrategy()
+        signals = await strategy.generate_signals(
+            bars={"markets": [make_repricing_market()]},
+            market_regime=MarketRegime.UNKNOWN,
+        )
+        assert len(signals) >= 1
+        assert signals[0].tier == StrategyTier.SNIPER
+        assert signals[0].position_size_usd == 500.0
 
 
 class TestConfidence:
@@ -181,8 +209,15 @@ class TestStrategyConfig:
 
     def test_default_params(self):
         s = NewsDrivenStrategy()
-        assert s.parameters["price_move_threshold"] == 0.08
+        assert s.parameters["price_move_threshold"] == 0.06
+        assert s.parameters["volume_spike_mult"] == 2.5
+        assert s.parameters["min_volume"] == 100
+        assert s.parameters["max_spread"] == 0.12
+        assert s.parameters["position_size_usd"] == 500.0
         assert s.asset_class.value == "predictions"
+        assert s.tier == StrategyTier.SNIPER
+        assert s.timeframe == "realtime"
+        assert s.max_signals_per_cycle == 2
 
     def test_custom_params(self):
         s = NewsDrivenStrategy(parameters={"max_signals": 5})

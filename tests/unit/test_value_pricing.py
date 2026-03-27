@@ -8,12 +8,17 @@ Tests cover:
 - Signal ranking by edge size
 - Confidence calculation
 - Edge cases (no markets, no edge, illiquid markets)
+- MarketSkimmerStrategy (SCOUT tier)
 """
 
 import pytest
 
+from config.tiers import StrategyTier
 from engines.models import AssetClass, MarketRegime, Side
-from engines.strategy.predictions.value_pricing import ValuePricingStrategy
+from engines.strategy.predictions.value_pricing import (
+    MarketSkimmerStrategy,
+    ValuePricingStrategy,
+)
 
 
 def _make_market(
@@ -179,7 +184,7 @@ class TestSignalGeneration:
         strategy = ValuePricingStrategy()
         markets = [_market_with_yes_edge(edge=0.10)]
         signals = await strategy.generate_signals(
-            market_data={"markets": markets},
+            bars={"markets": markets},
             market_regime=MarketRegime.UNKNOWN,
         )
         assert len(signals) >= 1
@@ -193,7 +198,7 @@ class TestSignalGeneration:
         strategy = ValuePricingStrategy()
         markets = [_market_with_no_edge(edge=0.10)]
         signals = await strategy.generate_signals(
-            market_data={"markets": markets},
+            bars={"markets": markets},
             market_regime=MarketRegime.UNKNOWN,
         )
         assert len(signals) == 1
@@ -207,7 +212,7 @@ class TestSignalGeneration:
             {**_market_with_yes_edge(edge=0.15), "ticker": "BIG-EDGE"},
         ]
         signals = await strategy.generate_signals(
-            market_data={"markets": markets},
+            bars={"markets": markets},
             market_regime=MarketRegime.UNKNOWN,
         )
         if len(signals) == 2:
@@ -222,7 +227,7 @@ class TestSignalGeneration:
             for i in range(5)
         ]
         signals = await strategy.generate_signals(
-            market_data={"markets": markets},
+            bars={"markets": markets},
             market_regime=MarketRegime.UNKNOWN,
         )
         assert len(signals) <= 2
@@ -231,7 +236,7 @@ class TestSignalGeneration:
     async def test_no_markets_returns_empty(self):
         strategy = ValuePricingStrategy()
         signals = await strategy.generate_signals(
-            market_data={"markets": []},
+            bars={"markets": []},
             market_regime=MarketRegime.UNKNOWN,
         )
         assert signals == []
@@ -240,7 +245,7 @@ class TestSignalGeneration:
     async def test_empty_market_data(self):
         strategy = ValuePricingStrategy()
         signals = await strategy.generate_signals(
-            market_data={},
+            bars={},
             market_regime=MarketRegime.UNKNOWN,
         )
         assert signals == []
@@ -258,10 +263,23 @@ class TestSignalGeneration:
             for i in range(5)
         ]
         signals = await strategy.generate_signals(
-            market_data={"markets": markets},
+            bars={"markets": markets},
             market_regime=MarketRegime.UNKNOWN,
         )
         assert signals == []
+
+    @pytest.mark.asyncio
+    async def test_signal_includes_tier_and_position_size(self):
+        """Signals must include tier and position_size_usd fields."""
+        strategy = ValuePricingStrategy()
+        markets = [_market_with_yes_edge(edge=0.10)]
+        signals = await strategy.generate_signals(
+            bars={"markets": markets},
+            market_regime=MarketRegime.UNKNOWN,
+        )
+        assert len(signals) >= 1
+        assert signals[0].tier == StrategyTier.CORE
+        assert signals[0].position_size_usd == 50.0
 
 
 class TestConfidence:
@@ -312,6 +330,9 @@ class TestStrategyConfig:
         assert strategy.asset_class == AssetClass.PREDICTIONS
         assert strategy.parameters["min_edge"] == 0.05
         assert strategy.parameters["max_signals"] == 3
+        assert strategy.tier == StrategyTier.CORE
+        assert strategy.timeframe == "realtime"
+        assert strategy.max_signals_per_cycle == 3
 
     def test_custom_params(self):
         strategy = ValuePricingStrategy(
@@ -341,3 +362,43 @@ class TestStrategyConfig:
         # $50 / $0.40 = 125 contracts
         assert signal.quantity == 125.0
         assert signal.target_price == 0.40
+
+
+class TestMarketSkimmer:
+    """SCOUT tier skimmer strategy."""
+
+    def test_scout_tier(self):
+        skimmer = MarketSkimmerStrategy()
+        assert skimmer.tier == StrategyTier.SCOUT
+        assert skimmer.strategy_id == "skimmer_kalshi"
+        assert skimmer.timeframe == "realtime"
+
+    def test_looser_params(self):
+        skimmer = MarketSkimmerStrategy()
+        assert skimmer.parameters["min_edge"] == 0.03
+        assert skimmer.parameters["min_volume"] == 50
+        assert skimmer.parameters["max_spread"] == 0.25
+        assert skimmer.parameters["scan_limit"] == 100
+
+    @pytest.mark.asyncio
+    async def test_finds_opportunities_core_misses(self):
+        """Skimmer should find edges that CORE ignores (edge < 0.05)."""
+        core = ValuePricingStrategy()
+        skimmer = MarketSkimmerStrategy()
+
+        # Market with small edge (0.04) — below CORE threshold
+        market = _market_with_yes_edge(edge=0.04)
+        core_opp = core._evaluate_market(market)
+        skimmer_opp = skimmer._evaluate_market(market)
+
+        assert core_opp is None  # CORE ignores small edge
+        assert skimmer_opp is not None  # SCOUT finds it
+
+    @pytest.mark.asyncio
+    async def test_accepts_lower_volume(self):
+        """Skimmer accepts markets with lower volume."""
+        skimmer = MarketSkimmerStrategy()
+        market = _market_with_yes_edge(edge=0.10)
+        market["volume"] = 60  # Below CORE's 100, above SCOUT's 50
+        opp = skimmer._evaluate_market(market)
+        assert opp is not None

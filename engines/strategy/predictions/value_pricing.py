@@ -20,17 +20,15 @@ Pricing model (simple, pre-Learning Engine):
 Future enhancement: Claude-powered probability estimation replaces
 the simple fair-value model.
 
-Default parameters:
-- min_edge: 0.05 (5 cent edge to trade)
-- min_volume: 100 (contracts traded)
-- max_price: 0.90 (don't buy near-certainties — thin edge)
-- min_price: 0.10 (don't buy near-zero — likely to expire worthless)
-- position_size_usd: 50.0 (small for prediction markets)
+Two tiers:
+- ValuePricingStrategy (CORE): conservative parameters
+- MarketSkimmerStrategy (SCOUT): looser params, wider net
 """
 
 import logging
 from typing import Any
 
+from config.tiers import StrategyTier
 from engines.models import (
     AssetClass,
     MarketRegime,
@@ -51,6 +49,8 @@ class ValuePricingStrategy(Strategy):
 
     Identifies edges by comparing bid/ask spreads to implied
     fair values, filtered by volume and price bounds.
+
+    CORE tier: conservative thresholds, fewer but higher-quality signals.
     """
 
     def __init__(
@@ -77,26 +77,29 @@ class ValuePricingStrategy(Strategy):
             strategy_id=strategy_id,
             asset_class=AssetClass.PREDICTIONS,
             parameters=default_params,
+            tier=StrategyTier.CORE,
+            timeframe="realtime",
+            max_signals_per_cycle=3,
         )
 
     async def generate_signals(
         self,
-        market_data: dict[str, Any],
+        bars: dict[str, list[dict]],
         market_regime: MarketRegime,
     ) -> list[Signal]:
         """
         Scan prediction markets and generate signals for mispriced contracts.
 
         Args:
-            market_data: Must contain 'markets' key with list of market dicts.
-                         Each market: {ticker, title, yes_bid, no_bid,
-                                       yes_ask, no_ask, volume, open_interest}
+            bars: For prediction strategies, contains a "markets" key with
+                  list of market dicts. Each market: {ticker, title, yes_bid,
+                  no_bid, yes_ask, no_ask, volume, open_interest}
             market_regime: Current market regime (less relevant for predictions).
 
         Returns:
             List of 0 to max_signals Signal objects, ranked by edge size.
         """
-        markets = market_data.get("markets", [])
+        markets = bars.get("markets", [])
         if not markets:
             logger.debug("No prediction markets available to scan")
             return []
@@ -308,6 +311,8 @@ class ValuePricingStrategy(Strategy):
                 f"vol: {opp['volume']}, OI: {opp['open_interest']})"
             ),
             market_regime=market_regime,
+            position_size_usd=self.parameters["position_size_usd"],
+            tier=self.tier,
         )
 
     @staticmethod
@@ -317,14 +322,14 @@ class ValuePricingStrategy(Strategy):
 
         Larger edge + tighter spread + higher volume = higher confidence.
         """
-        # Edge contribution (0–0.5): bigger edge = better
+        # Edge contribution (0-0.5): bigger edge = better
         edge_score = min(opp["edge"] / 0.20, 0.5)
 
-        # Spread contribution (0–0.25): tighter = better
+        # Spread contribution (0-0.25): tighter = better
         spread = opp.get("spread", 0.10)
         spread_score = max(0.25 - (spread / 0.20) * 0.25, 0.0)
 
-        # Volume contribution (0–0.25): more volume = more reliable pricing
+        # Volume contribution (0-0.25): more volume = more reliable pricing
         volume = opp.get("volume", 0)
         vol_score = min(volume / 2000.0, 0.25)
 
@@ -351,4 +356,45 @@ class ValuePricingStrategy(Strategy):
             max_drawdown=0.0,
             risk_budget_used_pct=0.0,
             status=self.status,
+        )
+
+
+class MarketSkimmerStrategy(ValuePricingStrategy):
+    """
+    SCOUT tier market skimmer — wider net, looser parameters.
+
+    Scans more markets with lower thresholds to find opportunities
+    the CORE strategy would miss. Smaller position sizes compensate
+    for the lower-conviction signals.
+    """
+
+    def __init__(
+        self,
+        strategy_id: str = "skimmer_kalshi",
+        parameters: dict[str, Any] | None = None,
+    ):
+        scout_params = {
+            "symbol": "",
+            "min_edge": 0.03,          # Looser: was 0.05
+            "min_volume": 50,          # Looser: was 100
+            "min_open_interest": 25,   # Proportional to volume change
+            "min_price": 0.10,
+            "max_price": 0.90,
+            "max_spread": 0.25,        # Looser: was 0.15
+            "position_size_usd": 50.0, # Same small size
+            "max_signals": 3,
+            "scan_limit": 100,         # Wider: was 50
+        }
+        if parameters:
+            scout_params.update(parameters)
+
+        # Skip ValuePricingStrategy.__init__, call Strategy directly
+        Strategy.__init__(
+            self,
+            strategy_id=strategy_id,
+            asset_class=AssetClass.PREDICTIONS,
+            parameters=scout_params,
+            tier=StrategyTier.SCOUT,
+            timeframe="realtime",
+            max_signals_per_cycle=3,
         )

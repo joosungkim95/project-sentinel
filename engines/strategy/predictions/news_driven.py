@@ -1,6 +1,8 @@
 """
 News-Driven Strategy — Detects rapid repricing in prediction markets.
 
+SNIPER tier: high-conviction, event-driven signals.
+
 Instead of directly consuming news, this strategy detects the *effects*
 of news by monitoring prediction market price and volume movements.
 When a market suddenly moves with high volume, someone knows something
@@ -16,8 +18,8 @@ The initial repricing often overshoots, but the direction is usually right.
 We buy the direction and take profit at a conservative target.
 
 Default parameters:
-- price_move_threshold: 0.08 (8 cent move from 5-period avg)
-- volume_spike_mult: 3.0 (3x average volume)
+- price_move_threshold: 0.06 (6 cent move from 5-period avg)
+- volume_spike_mult: 2.5 (2.5x average volume)
 - lookback: 5 (bars for recent average)
 - take_profit_pct: 0.5 (take 50% of the remaining distance to 0 or 1)
 """
@@ -25,6 +27,7 @@ Default parameters:
 import logging
 from typing import Any
 
+from config.tiers import StrategyTier
 from engines.models import (
     AssetClass,
     MarketRegime,
@@ -45,6 +48,8 @@ class NewsDrivenStrategy(Strategy):
 
     Monitors for volume/price spikes that indicate rapid repricing,
     then rides the momentum of the move.
+
+    SNIPER tier: fewer, higher-conviction event-driven signals.
     """
 
     def __init__(
@@ -54,15 +59,15 @@ class NewsDrivenStrategy(Strategy):
     ):
         default_params = {
             "symbol": "",  # Dynamic — picks from market scan
-            "price_move_threshold": 0.08,  # Min price move to trigger
-            "volume_spike_mult": 3.0,      # Volume must be 3x average
+            "price_move_threshold": 0.06,  # Min price move to trigger (was 0.08)
+            "volume_spike_mult": 2.5,      # Volume must be 2.5x average (was 3.0)
             "lookback": 5,                 # Bars for recent average
             "take_profit_pct": 0.5,        # Take profit at 50% of remaining
-            "min_volume": 200,             # Min absolute volume
+            "min_volume": 100,             # Min absolute volume (was 200)
             "min_price": 0.15,             # Don't trade extremes
             "max_price": 0.85,
-            "max_spread": 0.10,            # Tighter spread than value_pricing
-            "position_size_usd": 40.0,     # Conservative
+            "max_spread": 0.12,            # Slightly relaxed (was 0.10)
+            "position_size_usd": 500.0,    # Larger for SNIPER (was 40)
             "max_signals": 2,              # Fewer, higher-conviction trades
             "scan_limit": 50,
         }
@@ -73,19 +78,28 @@ class NewsDrivenStrategy(Strategy):
             strategy_id=strategy_id,
             asset_class=AssetClass.PREDICTIONS,
             parameters=default_params,
+            tier=StrategyTier.SNIPER,
+            timeframe="realtime",
+            max_signals_per_cycle=2,
         )
 
     async def generate_signals(
         self,
-        market_data: dict[str, Any],
+        bars: dict[str, list[dict]],
         market_regime: MarketRegime,
     ) -> list[Signal]:
         """
         Scan prediction markets for news-driven repricing events.
 
-        Each market in the data is checked for price movement + volume spike.
+        Args:
+            bars: For prediction strategies, contains a "markets" key with
+                  list of market dicts showing price/volume activity.
+            market_regime: Current market regime classification.
+
+        Returns:
+            List of Signal objects for detected repricing events.
         """
-        markets = market_data.get("markets", [])
+        markets = bars.get("markets", [])
         if not markets:
             return []
 
@@ -224,6 +238,8 @@ class NewsDrivenStrategy(Strategy):
                 f"with {volume:,} vol. Riding repricing momentum."
             ),
             market_regime=market_regime,
+            position_size_usd=self.parameters["position_size_usd"],
+            tier=self.tier,
         )
 
     @staticmethod
@@ -231,17 +247,18 @@ class NewsDrivenStrategy(Strategy):
         score: float, volume: int, move_magnitude: float
     ) -> float:
         """Higher confidence for bigger moves with more volume."""
-        # Score contribution (0–0.4)
+        # Score contribution (0-0.4)
         score_component = min(score / 2, 0.4)
-        # Volume contribution (0–0.3)
+        # Volume contribution (0-0.3)
         vol_component = min(volume / 10000, 0.3)
-        # Move magnitude (0–0.3)
+        # Move magnitude (0-0.3)
         move_component = min(move_magnitude / 0.3, 0.3)
 
         confidence = score_component + vol_component + move_component
         return min(max(confidence, 0.15), 1.0)
 
     async def get_performance(self, period_days: int) -> StrategyPerformance:
+        """Calculate performance metrics. TODO: implement with DB."""
         return StrategyPerformance(
             strategy_id=self.strategy_id,
             period_days=period_days,
@@ -255,6 +272,7 @@ class NewsDrivenStrategy(Strategy):
 
     @staticmethod
     def _classify_strength(confidence: float) -> SignalStrength:
+        """Map confidence to signal strength."""
         if confidence >= 0.8:
             return SignalStrength.STRONG
         elif confidence >= 0.6:
