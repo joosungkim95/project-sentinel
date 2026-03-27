@@ -52,3 +52,41 @@ def test_crypto_symbols():
     assert "BTC-USD" in CRYPTO_SYMBOLS
     assert "SOL-USD" in CRYPTO_SYMBOLS
     assert len(CRYPTO_SYMBOLS) == 5
+
+
+from engines.models import Signal, AssetClass, Side, SignalStrength
+
+
+def _make_test_signal(**overrides):
+    """Helper to construct a valid Signal with all required fields."""
+    defaults = dict(
+        strategy_id="test",
+        asset_class=AssetClass.EQUITIES,
+        symbol="SPY",
+        side=Side.BUY,
+        quantity=1.0,
+        target_price=500.0,
+        confidence=0.8,
+        strength=SignalStrength.MODERATE,
+        rationale="test signal",
+        position_size_usd=100.0,
+    )
+    defaults.update(overrides)
+    return Signal(**defaults)
+
+
+def test_signal_has_tier_field():
+    from config.tiers import StrategyTier
+    signal = _make_test_signal(tier=StrategyTier.SCOUT)
+    assert signal.tier == StrategyTier.SCOUT
+
+
+def test_signal_has_position_size_field():
+    signal = _make_test_signal(position_size_usd=250.0)
+    assert signal.position_size_usd == 250.0
+
+
+def test_signal_tier_defaults_to_core():
+    signal = _make_test_signal()
+    from config.tiers import StrategyTier
+    assert signal.tier == StrategyTier.CORE

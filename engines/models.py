@@ -11,6 +11,8 @@ from typing import Optional
 
 from pydantic import BaseModel, Field
 
+from config.tiers import StrategyTier
+
 
 # --- Enums ---
 
@@ -69,6 +71,8 @@ class Signal(BaseModel):
     strength: SignalStrength
     rationale: str
     market_regime: MarketRegime = MarketRegime.UNKNOWN
+    position_size_usd: float = 0.0  # USD value of the position — used by TierBudgetRule
+    tier: StrategyTier = StrategyTier.CORE  # Default for backward compat
     timestamp: datetime = Field(default_factory=datetime.utcnow)
 
 
