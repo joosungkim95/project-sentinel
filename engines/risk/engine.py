@@ -25,7 +25,9 @@ from engines.risk.rules import (
     HardFloorRule,
     PositionSizeRule,
     AssetClassConcentrationRule,
+    ConfidenceGateRule,
     DailyLossCircuitBreaker,
+    TierBudgetRule,
     WeeklyDrawdownRule,
     CorrelationRule,
 )
@@ -52,6 +54,7 @@ class RiskEngine:
 
     def _initialize_rules(self) -> list[RiskRule]:
         """Initialize rules in priority order (most restrictive first)."""
+        self._tier_budget_rule = TierBudgetRule()
         return [
             HardFloorRule(
                 floor_pct=self.config.hard_floor_pct,
@@ -59,6 +62,8 @@ class RiskEngine:
             DailyLossCircuitBreaker(
                 max_daily_loss_pct=self.config.max_daily_loss_pct,
             ),
+            ConfidenceGateRule(),
+            self._tier_budget_rule,
             WeeklyDrawdownRule(
                 max_weekly_drawdown_pct=self.config.max_weekly_drawdown_pct,
                 reduction_factor=self.config.drawdown_reduction_factor,

@@ -15,6 +15,7 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import Optional
 
+from config.tiers import TIER_CONFIDENCE_THRESHOLD, TIER_RISK_BUDGET, StrategyTier
 from engines.models import (
     AssetClass,
     PortfolioSnapshot,
@@ -278,8 +279,9 @@ class CorrelationRule(RiskRule):
 
     # Default correlation groups
     CORRELATION_GROUPS: dict[str, list[str]] = {
-        "crypto_ecosystem": ["BTC", "ETH", "SOL", "MATIC"],
+        "crypto_ecosystem": ["BTC", "ETH", "SOL", "AVAX", "DOGE"],
         "us_broad_market": ["SPY", "QQQ", "IWM", "DIA"],
+        "us_mega_tech": ["AAPL", "MSFT", "NVDA"],
     }
 
     def __init__(self, max_correlated_exposure_pct: float = 50.0):
@@ -329,3 +331,77 @@ class CorrelationRule(RiskRule):
             )
 
         return RuleResult()
+
+
+class ConfidenceGateRule(RiskRule):
+    """
+    Reject signals whose confidence is below the tier's minimum threshold.
+
+    Each StrategyTier has a required minimum confidence defined in
+    config.tiers.TIER_CONFIDENCE_THRESHOLD. Signals below their tier's
+    threshold are rejected before any other sizing or budget check.
+    """
+
+    def check(
+        self,
+        signal: Signal,
+        portfolio: PortfolioSnapshot,
+        current_quantity: float,
+    ) -> RuleResult:
+        threshold = TIER_CONFIDENCE_THRESHOLD[signal.tier]
+        if signal.confidence < threshold:
+            return RuleResult(
+                rejected=True,
+                reason=(
+                    f"Signal confidence {signal.confidence:.2f} is below "
+                    f"{signal.tier.value} tier threshold ({threshold:.2f})"
+                ),
+            )
+        return RuleResult()
+
+
+class TierBudgetRule(RiskRule):
+    """
+    Enforce per-tier USD exposure limits.
+
+    Each tier is allocated a fraction of portfolio value defined by
+    TIER_RISK_BUDGET. This rule tracks in-memory exposure per tier
+    and rejects trades that would exceed the budget.
+    """
+
+    def __init__(self) -> None:
+        self._exposure: dict[StrategyTier, float] = {
+            tier: 0.0 for tier in StrategyTier
+        }
+
+    def check(
+        self,
+        signal: Signal,
+        portfolio: PortfolioSnapshot,
+        current_quantity: float,
+    ) -> RuleResult:
+        budget_frac = TIER_RISK_BUDGET[signal.tier]
+        budget_usd = budget_frac * portfolio.total_value
+        current_exposure = self._exposure[signal.tier]
+        proposed = current_exposure + signal.position_size_usd
+
+        if proposed > budget_usd:
+            return RuleResult(
+                rejected=True,
+                reason=(
+                    f"{signal.tier.value} tier budget exceeded: "
+                    f"${proposed:,.0f} proposed vs ${budget_usd:,.0f} limit "
+                    f"(current exposure ${current_exposure:,.0f})"
+                ),
+            )
+        return RuleResult()
+
+    def on_trade_executed(self, signal: Signal) -> None:
+        """Record that a trade's exposure has been added to its tier."""
+        self._exposure[signal.tier] += signal.position_size_usd
+
+    def on_position_closed(self, signal: Signal) -> None:
+        """Free exposure when a position is closed."""
+        self._exposure[signal.tier] = max(
+            0.0, self._exposure[signal.tier] - signal.position_size_usd
+        )
