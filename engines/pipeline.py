@@ -28,6 +28,12 @@ from engines.models import (
 )
 from engines.risk.engine import RiskEngine
 from engines.strategy.base import Strategy
+from config.tiers import (
+    COINBASE_TIMEFRAME_MAP,
+    StrategyTier,
+    TIER_TIMEFRAMES,
+    TIMEFRAME_AGGREGATION,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -272,6 +278,255 @@ class TradingPipeline:
                 "Failed to fetch prediction markets: %s", e
             )
             return {}
+
+    async def run_tier(
+        self,
+        tier: StrategyTier,
+        asset_class_str: str,
+        strategies: list[Strategy],
+        market_regime: MarketRegime,
+    ) -> list[TradeResult]:
+        """Run all strategies for one (tier, asset_class) combination.
+
+        Args:
+            tier: The strategy tier (scout, core, sniper).
+            asset_class_str: Asset class string ("equities", "crypto", "predictions").
+            strategies: Strategies to run (already filtered to this tier/asset class).
+            market_regime: Current market regime classification.
+
+        Returns:
+            List of trade results from this tier run.
+        """
+        results: list[TradeResult] = []
+        timeframe = TIER_TIMEFRAMES[tier][asset_class_str]
+
+        active = [
+            s for s in strategies
+            if s.status.value in ("active", "paper_testing")
+        ]
+        if not active:
+            return results
+
+        # Prediction markets: fetch per-strategy, no shared bar data
+        if timeframe == "realtime":
+            for strategy in active:
+                try:
+                    adapter = self.executor._adapters.get(strategy.asset_class)
+                    if adapter is None:
+                        continue
+                    pred_data = await self._fetch_prediction_data(
+                        adapter, strategy,
+                    )
+                    signals = await strategy.generate_signals(
+                        bars={"markets": pred_data.get("markets", [])},
+                        market_regime=market_regime,
+                    )
+                    for signal in signals:
+                        result = await self._evaluate_and_execute(signal)
+                        if result is not None:
+                            results.append(result)
+                except Exception as e:
+                    logger.error(
+                        "Error in prediction strategy %s: %s",
+                        strategy.strategy_id, e, exc_info=True,
+                    )
+                    await alert_system_error(
+                        error=str(e),
+                        component=f"Strategy: {strategy.strategy_id}",
+                    )
+            return results
+
+        # Bar-based strategies: collect all symbols, fetch once per symbol
+        asset_class = active[0].asset_class
+        adapter = self.executor._adapters.get(asset_class)
+        if adapter is None:
+            logger.debug("No adapter for %s — skipping tier %s", asset_class_str, tier.value)
+            return results
+
+        all_symbols: set[str] = set()
+        for strategy in active:
+            all_symbols.update(strategy.symbols)
+        all_symbols.discard("")
+
+        bars_by_symbol = await self._fetch_bars_for_tier(
+            adapter, list(all_symbols), timeframe, asset_class_str,
+        )
+
+        for strategy in active:
+            try:
+                strategy_bars = {
+                    sym: bars_by_symbol[sym]
+                    for sym in strategy.symbols
+                    if sym in bars_by_symbol and bars_by_symbol[sym]
+                }
+                if not strategy_bars:
+                    logger.debug(
+                        "No bar data for strategy %s — skipping",
+                        strategy.strategy_id,
+                    )
+                    continue
+
+                signals = await strategy.generate_signals(
+                    bars=strategy_bars,
+                    market_regime=market_regime,
+                )
+                for signal in signals:
+                    result = await self._evaluate_and_execute(signal)
+                    if result is not None:
+                        results.append(result)
+            except Exception as e:
+                logger.error(
+                    "Error in strategy %s: %s",
+                    strategy.strategy_id, e, exc_info=True,
+                )
+                await alert_system_error(
+                    error=str(e),
+                    component=f"Strategy: {strategy.strategy_id}",
+                )
+
+        return results
+
+    async def _fetch_bars_for_tier(
+        self,
+        adapter: Any,
+        symbols: list[str],
+        timeframe: str,
+        asset_class_str: str,
+    ) -> dict[str, list[dict]]:
+        """Fetch bar data for multiple symbols at a given timeframe.
+
+        Args:
+            adapter: Platform adapter (Alpaca or Coinbase).
+            symbols: List of symbols to fetch.
+            timeframe: Canonical timeframe string (e.g., "1Day", "4Hour").
+            asset_class_str: Asset class string for timeframe mapping.
+
+        Returns:
+            Dict mapping symbol to list of bar dicts.
+        """
+        fetch = getattr(adapter, "get_historical_bars", None)
+        if fetch is None:
+            return {}
+
+        result: dict[str, list[dict]] = {}
+        agg_config = TIMEFRAME_AGGREGATION.get(timeframe)
+
+        for symbol in symbols:
+            try:
+                if asset_class_str == "crypto" and agg_config:
+                    # Fetch at source granularity and aggregate
+                    source_granularity = agg_config["source"]
+                    factor = agg_config["factor"]
+                    raw_bars = await fetch(
+                        symbol,
+                        granularity=source_granularity,
+                        limit=DEFAULT_BARS_LIMIT * factor,
+                    )
+                    result[symbol] = aggregate_bars(raw_bars, factor=factor)
+                elif asset_class_str == "crypto":
+                    # Direct fetch with Coinbase granularity mapping
+                    cb_granularity = COINBASE_TIMEFRAME_MAP.get(timeframe, "ONE_DAY")
+                    raw_bars = await fetch(
+                        symbol,
+                        granularity=cb_granularity,
+                        limit=DEFAULT_BARS_LIMIT,
+                    )
+                    result[symbol] = raw_bars
+                else:
+                    # Equities: pass timeframe directly to Alpaca
+                    raw_bars = await fetch(
+                        symbol,
+                        timeframe=timeframe,
+                        limit=DEFAULT_BARS_LIMIT,
+                    )
+                    result[symbol] = raw_bars
+
+                logger.debug(
+                    "Fetched %d bars for %s (%s, %s)",
+                    len(result[symbol]), symbol, timeframe, asset_class_str,
+                )
+            except Exception as e:
+                logger.warning(
+                    "Failed to fetch bars for %s (%s): %s",
+                    symbol, timeframe, e,
+                )
+                result[symbol] = []
+
+        return result
+
+    async def _evaluate_and_execute(
+        self, signal: Signal,
+    ) -> TradeResult | None:
+        """Evaluate a signal through risk engine and execute if approved.
+
+        Args:
+            signal: Trading signal to evaluate.
+
+        Returns:
+            TradeResult if a trade was attempted, None if rejected.
+        """
+        portfolio = await self.executor.get_portfolio_snapshot()
+        risk_result = self.risk_engine.evaluate(signal, portfolio)
+
+        if risk_result.decision == RiskDecision.REJECTED:
+            logger.info(
+                "Signal REJECTED: %s %s %s — %s",
+                signal.side.value,
+                signal.symbol,
+                signal.strategy_id,
+                risk_result.rejection_reasons,
+            )
+            await alert_risk_event(
+                event_type="Signal Rejected",
+                details=(
+                    f"{signal.strategy_id}: {signal.side.value} "
+                    f"{signal.symbol} — "
+                    f"{', '.join(risk_result.rejection_reasons)}"
+                ),
+                portfolio_value=portfolio.total_value,
+            )
+            await self._log_outcome(signal, risk_result, None)
+            return None
+
+        # APPROVED or REDUCED — execute
+        trade_result = await self.executor.execute(risk_result)
+
+        if trade_result.executed:
+            logger.info(
+                "Trade EXECUTED: %s %s @ %s (strategy: %s)",
+                signal.side.value,
+                signal.symbol,
+                trade_result.fill_price,
+                signal.strategy_id,
+            )
+            await alert_trade_executed(
+                symbol=signal.symbol,
+                side=signal.side.value,
+                quantity=trade_result.fill_quantity or 0,
+                price=trade_result.fill_price or 0,
+                strategy=signal.strategy_id,
+            )
+        else:
+            logger.warning(
+                "Trade FAILED: %s %s — %s",
+                signal.side.value,
+                signal.symbol,
+                trade_result.error_message,
+            )
+
+        await self._log_outcome(signal, risk_result, trade_result)
+
+        # Check circuit breaker
+        portfolio = await self.executor.get_portfolio_snapshot()
+        if self._should_activate_circuit_breaker(portfolio):
+            self.risk_engine.activate_circuit_breaker()
+            await alert_circuit_breaker(
+                reason="Automated circuit breaker trigger",
+                portfolio_value=portfolio.total_value,
+                daily_pnl=portfolio.daily_pnl,
+            )
+
+        return trade_result
 
     def _should_activate_circuit_breaker(self, portfolio) -> bool:
         """Check if conditions warrant activating the circuit breaker."""
