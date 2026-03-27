@@ -328,6 +328,28 @@ class TradingScheduler:
                     "Fast loop complete: %d strategies",
                     len(result.get("strategies", {})),
                 )
+
+            # Signal drought detection
+            try:
+                from engines.learning.drought_detector import detect_and_alert
+
+                scheduler_status = self.status()
+                shadow_stats = (
+                    self.executor.stats.summary()
+                    if hasattr(self.executor, "stats")
+                    else {"total_signals": 0}
+                )
+                droughts = await detect_and_alert(
+                    scheduler_status, shadow_stats
+                )
+                if droughts:
+                    logger.info(
+                        "Signal drought detected: %d jobs with 0 signals",
+                        len(droughts),
+                    )
+            except Exception as e:
+                logger.warning("Drought detection failed: %s", e)
+
         except Exception as e:
             logger.error("Fast loop failed: %s", e, exc_info=True)
             await alert_system_error(
