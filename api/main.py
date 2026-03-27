@@ -33,58 +33,48 @@ from engines.models import AssetClass
 from engines.recovery import HealthMonitor
 from engines.risk.engine import RiskEngine
 from engines.scheduler import TradingScheduler
-from engines.strategy.crypto.trend_following import TrendFollowingStrategy
-from engines.strategy.crypto.volatility_harvest import VolatilityHarvestStrategy
-from engines.strategy.equities.mean_reversion import MeanReversionStrategy
+
+# Scouts (fast, loose, small bets)
 from engines.strategy.equities.momentum import MomentumStrategy
-from engines.strategy.equities.sma_crossover import SMACrossoverStrategy
-from engines.strategy.predictions.news_driven import NewsDrivenStrategy
+from engines.strategy.crypto.breakout import BreakoutStrategy
+from engines.strategy.predictions.value_pricing import MarketSkimmerStrategy
+
+# Core (confirmed setups, balanced)
+from engines.strategy.equities.trend_following import EquityTrendFollowingStrategy
+from engines.strategy.equities.mean_reversion import MeanReversionStrategy
+from engines.strategy.crypto.trend_following import TrendFollowingStrategy
 from engines.strategy.predictions.value_pricing import ValuePricingStrategy
+
+# Snipers (rare, high-conviction)
+from engines.strategy.equities.sma_crossover import SMACrossoverStrategy
+from engines.strategy.crypto.volatility_harvest import VolatilityHarvestStrategy
+from engines.strategy.predictions.news_driven import NewsDrivenStrategy
 
 logger = logging.getLogger(__name__)
 
 
 def _build_strategies() -> list:
-    """Instantiate all active strategies."""
-    strategies = []
+    """Instantiate all 10 tiered strategies."""
+    strategies = [
+        # Scouts (fast, loose, small bets)
+        MomentumStrategy(),              # 7 equities, 15min
+        BreakoutStrategy(),              # 5 crypto, 1h
+        MarketSkimmerStrategy(),         # Kalshi scan, realtime
 
-    # --- Equities ---
-    sma = SMACrossoverStrategy()
-    sma.activate()
-    strategies.append(sma)
+        # Core (confirmed setups, balanced)
+        EquityTrendFollowingStrategy(),  # 4 equities, 4h
+        MeanReversionStrategy(),         # 7 equities, 4h
+        TrendFollowingStrategy(),        # 3 crypto, 4h
+        ValuePricingStrategy(),          # Kalshi scan, realtime
 
-    momentum = MomentumStrategy()
-    momentum.activate()
-    strategies.append(momentum)
+        # Snipers (rare, high-conviction)
+        SMACrossoverStrategy(),          # 3 equities, daily
+        VolatilityHarvestStrategy(),     # 2 crypto, daily
+        NewsDrivenStrategy(),            # Kalshi scan, realtime
+    ]
 
-    mean_rev = MeanReversionStrategy()
-    mean_rev.activate()
-    strategies.append(mean_rev)
-
-    # --- Crypto ---
-    trend_btc = TrendFollowingStrategy()
-    trend_btc.activate()
-    strategies.append(trend_btc)
-
-    trend_eth = TrendFollowingStrategy(
-        strategy_id="trend_eth",
-        parameters={"symbol": "ETH-USD", "position_size_usd": 150.0},
-    )
-    trend_eth.activate()
-    strategies.append(trend_eth)
-
-    vol_harvest = VolatilityHarvestStrategy()
-    vol_harvest.activate()
-    strategies.append(vol_harvest)
-
-    # --- Predictions ---
-    value_kalshi = ValuePricingStrategy()
-    value_kalshi.activate()
-    strategies.append(value_kalshi)
-
-    news_kalshi = NewsDrivenStrategy()
-    news_kalshi.activate()
-    strategies.append(news_kalshi)
+    for s in strategies:
+        s.activate()
 
     return strategies
 
@@ -358,6 +348,7 @@ async def get_strategies():
         "strategies": [
             {
                 "id": s.strategy_id,
+                "tier": s.tier.value,
                 "asset_class": s.asset_class.value,
                 "status": s.status.value,
                 "parameters": s.parameters,
