@@ -1,21 +1,22 @@
 """
 Mean Reversion Strategy — Bollinger Bands + RSI for equities.
 
+CORE tier: moderate frequency signals on 4-hour bars.
+
 Exploits the tendency of prices to revert to the mean after extreme moves.
-Best in ranging/low-volatility markets. Should be disabled during strong trends.
+Best in ranging/low-volatility markets. Blocked in downtrend regimes only
+(mean reversion in uptrends is less dangerous than in downtrends).
 
 Signal logic:
-- BUY: Price touches lower Bollinger Band AND RSI < 30 (oversold)
-- SELL: Price touches upper Bollinger Band AND RSI > 70 (overbought)
-         OR price reverts to middle band (take profit)
+- BUY: Price touches lower Bollinger Band AND RSI < 40 (oversold)
+- SELL: Price touches upper Bollinger Band AND RSI > 60 (overbought)
 
 Default parameters:
-- symbol: SPY
-- bb_period: 20 (Bollinger Band lookback)
-- bb_std: 2.0 (standard deviations for bands)
-- rsi_period: 14
-- rsi_oversold: 30.0
-- rsi_overbought: 70.0
+- symbols: all 7 equity symbols
+- bb_period: 20
+- bb_std: 1.5 (relaxed from 2.0 for more signals)
+- rsi_oversold: 40.0 (relaxed from 30.0)
+- rsi_overbought: 60.0 (relaxed from 70.0)
 """
 
 import logging
@@ -23,6 +24,8 @@ from typing import Any
 
 import numpy as np
 
+from config.symbols import EQUITY_SYMBOLS
+from config.tiers import StrategyTier
 from engines.models import (
     AssetClass,
     MarketRegime,
@@ -47,17 +50,16 @@ class MeanReversionStrategy(Strategy):
 
     def __init__(
         self,
-        strategy_id: str = "mean_reversion_spy",
+        strategy_id: str = "mean_reversion_equity",
         parameters: dict[str, Any] | None = None,
     ):
         default_params = {
-            "symbol": "SPY",
             "bb_period": 20,
-            "bb_std": 2.0,
+            "bb_std": 1.5,              # Relaxed from 2.0
             "rsi_period": 14,
-            "rsi_oversold": 30.0,
-            "rsi_overbought": 70.0,
-            "position_size_usd": 500.0,
+            "rsi_oversold": 40.0,       # Relaxed from 30.0
+            "rsi_overbought": 60.0,     # Relaxed from 70.0
+            "position_size_usd": 300.0,  # Reduced from 500
         }
         if parameters:
             default_params.update(parameters)
@@ -66,121 +68,159 @@ class MeanReversionStrategy(Strategy):
             strategy_id=strategy_id,
             asset_class=AssetClass.EQUITIES,
             parameters=default_params,
+            tier=StrategyTier.CORE,
+            symbols=EQUITY_SYMBOLS,
+            timeframe="4Hour",
+            max_signals_per_cycle=2,
         )
 
     async def generate_signals(
         self,
-        market_data: dict[str, Any],
+        bars: dict[str, list[dict]],
         market_regime: MarketRegime,
     ) -> list[Signal]:
         """
         Generate signals from Bollinger Bands and RSI.
 
-        Skips signal generation in strong trending regimes where
-        mean reversion is likely to fail.
+        Skips signal generation in downtrend regimes where
+        mean reversion is most dangerous. Uptrends are allowed
+        as defense-in-depth (mean reversion in uptrends is less risky).
         """
-        # Mean reversion is dangerous in strong trends
-        if market_regime in (
-            MarketRegime.TRENDING_UP,
-            MarketRegime.TRENDING_DOWN,
-        ):
+        # Mean reversion is dangerous in downtrends — block only those
+        if market_regime == MarketRegime.TRENDING_DOWN:
             logger.debug(
                 "Skipping mean reversion in %s regime", market_regime.value
             )
             return []
 
-        bars = market_data.get("bars", [])
-        min_bars = self.parameters["bb_period"] + self.parameters["rsi_period"] + 2
+        signals: list[Signal] = []
 
-        if len(bars) < min_bars:
-            return []
+        for symbol in self.symbols:
+            symbol_bars = bars.get(symbol, [])
+            min_bars = (
+                self.parameters["bb_period"]
+                + self.parameters["rsi_period"]
+                + 2
+            )
 
-        closes = np.array([b["close"] for b in bars])
-        current_price = closes[-1]
+            if len(symbol_bars) < min_bars:
+                continue
 
-        # Calculate indicators
-        upper, middle, lower = self._calc_bollinger_bands(
-            closes, self.parameters["bb_period"], self.parameters["bb_std"]
-        )
-        rsi = self._calc_rsi(closes, self.parameters["rsi_period"])
+            closes = np.array([b["close"] for b in symbol_bars])
+            current_price = closes[-1]
 
-        if upper is None or rsi is None:
-            return []
+            # Calculate indicators
+            upper, middle, lower = self._calc_bollinger_bands(
+                closes,
+                self.parameters["bb_period"],
+                self.parameters["bb_std"],
+            )
+            rsi = self._calc_rsi(closes, self.parameters["rsi_period"])
 
-        current_upper = upper[-1]
-        current_middle = middle[-1]
-        current_lower = lower[-1]
-        current_rsi = rsi[-1]
+            if upper is None or rsi is None:
+                continue
 
-        bb_width = (current_upper - current_lower) / current_middle if current_middle > 0 else 0
-        pct_b = (
-            (current_price - current_lower) / (current_upper - current_lower)
-            if (current_upper - current_lower) > 0 else 0.5
-        )
+            current_upper = upper[-1]
+            current_middle = middle[-1]
+            current_lower = lower[-1]
+            current_rsi = rsi[-1]
 
-        logger.debug(
-            "MeanRev %s: price=%.2f BB[%.2f/%.2f/%.2f] RSI=%.1f %%B=%.2f",
-            self.parameters["symbol"], current_price,
-            current_lower, current_middle, current_upper,
-            current_rsi, pct_b,
-        )
+            bb_width = (
+                (current_upper - current_lower) / current_middle
+                if current_middle > 0
+                else 0
+            )
+            pct_b = (
+                (current_price - current_lower)
+                / (current_upper - current_lower)
+                if (current_upper - current_lower) > 0
+                else 0.5
+            )
 
-        # BUY: price at/below lower band + RSI oversold
-        if (
-            current_price <= current_lower
-            and current_rsi < self.parameters["rsi_oversold"]
-        ):
-            confidence = self._calc_buy_confidence(pct_b, current_rsi, bb_width)
-            quantity = self.parameters["position_size_usd"] / current_price
-            take_profit = current_middle  # Target mean reversion to middle band
+            logger.debug(
+                "MeanRev %s: price=%.2f BB[%.2f/%.2f/%.2f] RSI=%.1f %%B=%.2f",
+                symbol,
+                current_price,
+                current_lower,
+                current_middle,
+                current_upper,
+                current_rsi,
+                pct_b,
+            )
 
-            return [
-                Signal(
-                    strategy_id=self.strategy_id,
-                    asset_class=self.asset_class,
-                    symbol=self.parameters["symbol"],
-                    side=Side.BUY,
-                    quantity=round(quantity, 2),
-                    target_price=current_price,
-                    take_profit=round(take_profit, 2),
-                    stop_loss=round(current_lower * 0.98, 2),
-                    confidence=confidence,
-                    strength=self._classify_strength(confidence),
-                    rationale=(
-                        f"Mean Reversion BUY: Price ${current_price:.2f} at lower "
-                        f"BB ${current_lower:.2f}, RSI={current_rsi:.1f} (oversold). "
-                        f"Target: middle band ${current_middle:.2f}"
-                    ),
-                    market_regime=market_regime,
+            position_size = self.parameters["position_size_usd"]
+
+            # BUY: price at/below lower band + RSI oversold
+            if (
+                current_price <= current_lower
+                and current_rsi < self.parameters["rsi_oversold"]
+            ):
+                confidence = self._calc_buy_confidence(
+                    pct_b, current_rsi, bb_width
                 )
-            ]
+                quantity = position_size / current_price
+                take_profit = current_middle
 
-        # SELL: price at/above upper band + RSI overbought
-        if (
-            current_price >= current_upper
-            and current_rsi > self.parameters["rsi_overbought"]
-        ):
-            confidence = self._calc_sell_confidence(pct_b, current_rsi, bb_width)
-
-            return [
-                Signal(
-                    strategy_id=self.strategy_id,
-                    asset_class=self.asset_class,
-                    symbol=self.parameters["symbol"],
-                    side=Side.SELL,
-                    quantity=0,  # Sell entire position
-                    target_price=current_price,
-                    confidence=confidence,
-                    strength=self._classify_strength(confidence),
-                    rationale=(
-                        f"Mean Reversion SELL: Price ${current_price:.2f} at upper "
-                        f"BB ${current_upper:.2f}, RSI={current_rsi:.1f} (overbought)."
-                    ),
-                    market_regime=market_regime,
+                signals.append(
+                    Signal(
+                        strategy_id=self.strategy_id,
+                        asset_class=self.asset_class,
+                        symbol=symbol,
+                        side=Side.BUY,
+                        quantity=round(quantity, 2),
+                        target_price=current_price,
+                        take_profit=round(take_profit, 2),
+                        stop_loss=round(current_lower * 0.98, 2),
+                        confidence=confidence,
+                        strength=self._classify_strength(confidence),
+                        rationale=(
+                            f"Mean Reversion BUY {symbol}: "
+                            f"Price ${current_price:.2f} at lower "
+                            f"BB ${current_lower:.2f}, "
+                            f"RSI={current_rsi:.1f} (oversold). "
+                            f"Target: middle band ${current_middle:.2f}"
+                        ),
+                        market_regime=market_regime,
+                        position_size_usd=position_size,
+                        tier=self.tier,
+                    )
                 )
-            ]
 
-        return []
+            # SELL: price at/above upper band + RSI overbought
+            elif (
+                current_price >= current_upper
+                and current_rsi > self.parameters["rsi_overbought"]
+            ):
+                confidence = self._calc_sell_confidence(
+                    pct_b, current_rsi, bb_width
+                )
+
+                signals.append(
+                    Signal(
+                        strategy_id=self.strategy_id,
+                        asset_class=self.asset_class,
+                        symbol=symbol,
+                        side=Side.SELL,
+                        quantity=0,  # Sell entire position
+                        target_price=current_price,
+                        confidence=confidence,
+                        strength=self._classify_strength(confidence),
+                        rationale=(
+                            f"Mean Reversion SELL {symbol}: "
+                            f"Price ${current_price:.2f} at upper "
+                            f"BB ${current_upper:.2f}, "
+                            f"RSI={current_rsi:.1f} (overbought)."
+                        ),
+                        market_regime=market_regime,
+                        position_size_usd=position_size,
+                        tier=self.tier,
+                    )
+                )
+
+            if len(signals) >= self.max_signals_per_cycle:
+                break
+
+        return signals[:self.max_signals_per_cycle]
 
     async def get_performance(self, period_days: int) -> StrategyPerformance:
         return StrategyPerformance(
@@ -203,10 +243,12 @@ class MeanReversionStrategy(Strategy):
             return None, None, None
 
         middle = np.array([
-            np.mean(prices[i - period:i]) for i in range(period, len(prices) + 1)
+            np.mean(prices[i - period:i])
+            for i in range(period, len(prices) + 1)
         ])
         std = np.array([
-            np.std(prices[i - period:i]) for i in range(period, len(prices) + 1)
+            np.std(prices[i - period:i])
+            for i in range(period, len(prices) + 1)
         ])
 
         upper = middle + num_std * std
@@ -241,23 +283,27 @@ class MeanReversionStrategy(Strategy):
         return np.array(rsi_values) if rsi_values else None
 
     @staticmethod
-    def _calc_buy_confidence(pct_b: float, rsi: float, bb_width: float) -> float:
+    def _calc_buy_confidence(
+        pct_b: float, rsi: float, bb_width: float
+    ) -> float:
         """Higher confidence when further below band with lower RSI."""
-        # Distance below band (0–0.4)
+        # Distance below band (0-0.4)
         band_score = min(max(-pct_b, 0) * 2, 0.4)
-        # RSI oversold depth (0–0.4)
-        rsi_score = min(max((30 - rsi) / 30, 0) * 0.4, 0.4)
-        # Wider bands = more volatile = less confident (0–0.2)
+        # RSI oversold depth (0-0.4)
+        rsi_score = min(max((40 - rsi) / 40, 0) * 0.4, 0.4)
+        # Wider bands = more volatile = less confident (0-0.2)
         width_penalty = min(bb_width * 2, 0.2)
 
         confidence = band_score + rsi_score + 0.2 - width_penalty
         return min(max(confidence, 0.1), 1.0)
 
     @staticmethod
-    def _calc_sell_confidence(pct_b: float, rsi: float, bb_width: float) -> float:
+    def _calc_sell_confidence(
+        pct_b: float, rsi: float, bb_width: float
+    ) -> float:
         """Higher confidence when further above band with higher RSI."""
         band_score = min(max(pct_b - 1.0, 0) * 2, 0.4)
-        rsi_score = min(max((rsi - 70) / 30, 0) * 0.4, 0.4)
+        rsi_score = min(max((rsi - 60) / 40, 0) * 0.4, 0.4)
         width_penalty = min(bb_width * 2, 0.2)
 
         confidence = band_score + rsi_score + 0.2 - width_penalty

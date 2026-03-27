@@ -1,8 +1,8 @@
 """
-Tests for the Momentum Strategy.
+Tests for the Momentum Scalp Strategy (SCOUT tier).
 
 Tests cover:
-- Indicator calculations (ROC, RSI, volume ratio)
+- Indicator calculations (RSI, volume ratio)
 - Buy signal generation
 - Sell signal generation
 - Edge cases (insufficient data, flat markets)
@@ -53,29 +53,6 @@ def _flat_bars(n: int = 60, price: float = 100.0) -> list[dict]:
     return _make_bars(closes, volumes)
 
 
-class TestROCCalculation:
-    """Rate of Change indicator."""
-
-    def test_basic_roc(self):
-        prices = np.array([100.0, 102.0, 105.0, 110.0, 108.0])
-        roc = MomentumStrategy._calc_roc(prices, period=2)
-        assert roc is not None
-        assert len(roc) == 3  # 5 - 2 = 3
-        # First ROC: (105 - 100) / 100 * 100 = 5.0
-        assert abs(roc[0] - 5.0) < 0.01
-
-    def test_roc_insufficient_data(self):
-        prices = np.array([100.0, 102.0])
-        roc = MomentumStrategy._calc_roc(prices, period=3)
-        assert roc is None
-
-    def test_roc_negative(self):
-        prices = np.array([110.0, 108.0, 105.0, 100.0, 95.0])
-        roc = MomentumStrategy._calc_roc(prices, period=2)
-        assert roc is not None
-        assert roc[-1] < 0  # Prices dropping
-
-
 class TestRSICalculation:
     """Relative Strength Index indicator."""
 
@@ -83,14 +60,14 @@ class TestRSICalculation:
         prices = np.array([float(i) for i in range(100, 120)])
         rsi = MomentumStrategy._calc_rsi(prices, period=14)
         assert rsi is not None
-        # All gains → RSI should be near 100
+        # All gains -> RSI should be near 100
         assert rsi[-1] > 90.0
 
     def test_rsi_all_losses(self):
         prices = np.array([float(i) for i in range(120, 100, -1)])
         rsi = MomentumStrategy._calc_rsi(prices, period=14)
         assert rsi is not None
-        # All losses → RSI should be near 0
+        # All losses -> RSI should be near 0
         assert rsi[-1] < 10.0
 
     def test_rsi_range(self):
@@ -112,9 +89,6 @@ class TestVolumeRatio:
     """Volume relative to moving average."""
 
     def test_above_average_volume(self):
-        # 20 bars at 500k then 1 bar at 1M
-        # The MA window ending at bar 20 includes bars 1–20 (avg ~525k),
-        # so ratio is 1M / 525k ≈ 1.9
         volumes = np.array([500_000] * 20 + [1_000_000])
         ratio = MomentumStrategy._calc_volume_ratio(volumes, ma_period=20)
         assert ratio is not None
@@ -138,34 +112,31 @@ class TestBuySignal:
     @pytest.mark.asyncio
     async def test_buy_on_strong_uptrend_with_volume(self):
         strategy = MomentumStrategy(parameters={
-            "symbol": "QQQ",
-            "roc_period": 14,
             "rsi_period": 14,
-            "roc_threshold": 2.0,
-            "rsi_buy_low": 50.0,
-            "rsi_buy_high": 70.0,
+            "rsi_buy_low": 55.0,
+            "rsi_buy_high": 85.0,
             "volume_ma_period": 20,
-            "volume_multiplier": 1.2,
-            "position_size_usd": 500.0,
+            "volume_multiplier": 1.0,
+            "position_size_usd": 75.0,
         })
         bars = _trending_up_bars(n=60)
         signals = await strategy.generate_signals(
-            market_data={"bars": bars},
+            bars={"SPY": bars},
             market_regime=MarketRegime.TRENDING_UP,
         )
         # With a strong uptrend + volume spike, should get a BUY
         if signals:
             assert signals[0].side == Side.BUY
-            assert signals[0].symbol == "QQQ"
             assert signals[0].confidence > 0.0
             assert signals[0].asset_class == AssetClass.EQUITIES
+            assert signals[0].position_size_usd == 75.0
 
     @pytest.mark.asyncio
     async def test_no_signal_flat_market(self):
         strategy = MomentumStrategy()
         bars = _flat_bars(n=60)
         signals = await strategy.generate_signals(
-            market_data={"bars": bars},
+            bars={"SPY": bars},
             market_regime=MarketRegime.RANGING,
         )
         assert len(signals) == 0
@@ -175,7 +146,7 @@ class TestBuySignal:
         strategy = MomentumStrategy()
         bars = _make_bars([100.0, 101.0, 102.0])
         signals = await strategy.generate_signals(
-            market_data={"bars": bars},
+            bars={"SPY": bars},
             market_regime=MarketRegime.UNKNOWN,
         )
         assert len(signals) == 0
@@ -187,21 +158,18 @@ class TestSellSignal:
     @pytest.mark.asyncio
     async def test_sell_on_downtrend(self):
         strategy = MomentumStrategy(parameters={
-            "symbol": "QQQ",
-            "roc_period": 14,
             "rsi_period": 14,
-            "roc_threshold": 2.0,
             "rsi_sell_threshold": 30.0,
             "volume_ma_period": 20,
-            "volume_multiplier": 1.2,
-            "position_size_usd": 500.0,
+            "volume_multiplier": 1.0,
+            "position_size_usd": 75.0,
         })
         bars = _trending_down_bars(n=60)
         signals = await strategy.generate_signals(
-            market_data={"bars": bars},
+            bars={"SPY": bars},
             market_regime=MarketRegime.TRENDING_DOWN,
         )
-        # In a downtrend, RSI should be low and/or ROC negative → SELL
+        # In a downtrend, RSI should be low -> SELL
         if signals:
             assert signals[0].side == Side.SELL
             assert signals[0].quantity == 0  # Sell entire position
@@ -212,22 +180,13 @@ class TestConfidence:
 
     def test_buy_confidence_bounded(self):
         conf = MomentumStrategy._calc_buy_confidence(
-            roc=5.0, rsi=60.0, vol_ratio=2.0
+            rsi=65.0, vol_ratio=2.0
         )
         assert 0.0 < conf <= 1.0
 
     def test_sell_confidence_bounded(self):
-        conf = MomentumStrategy._calc_sell_confidence(roc=-5.0, rsi=20.0)
+        conf = MomentumStrategy._calc_sell_confidence(rsi=20.0)
         assert 0.0 < conf <= 1.0
-
-    def test_higher_roc_higher_confidence(self):
-        low = MomentumStrategy._calc_buy_confidence(
-            roc=2.0, rsi=60.0, vol_ratio=1.5
-        )
-        high = MomentumStrategy._calc_buy_confidence(
-            roc=8.0, rsi=60.0, vol_ratio=1.5
-        )
-        assert high > low
 
 
 class TestStrategyConfig:
@@ -235,19 +194,20 @@ class TestStrategyConfig:
 
     def test_default_params(self):
         strategy = MomentumStrategy()
-        assert strategy.strategy_id == "momentum_qqq"
+        assert strategy.strategy_id == "momentum_scalp"
         assert strategy.asset_class == AssetClass.EQUITIES
-        assert strategy.parameters["symbol"] == "QQQ"
-        assert strategy.parameters["roc_period"] == 14
+        assert strategy.parameters["rsi_period"] == 14
+        assert strategy.parameters["position_size_usd"] == 75.0
+        assert strategy.parameters["volume_multiplier"] == 1.0
+        assert strategy.parameters["rsi_buy_low"] == 55.0
 
     def test_custom_params(self):
         strategy = MomentumStrategy(
-            strategy_id="momentum_spy",
-            parameters={"symbol": "SPY", "roc_threshold": 3.0},
+            strategy_id="momentum_custom",
+            parameters={"rsi_buy_low": 60.0},
         )
-        assert strategy.strategy_id == "momentum_spy"
-        assert strategy.parameters["symbol"] == "SPY"
-        assert strategy.parameters["roc_threshold"] == 3.0
+        assert strategy.strategy_id == "momentum_custom"
+        assert strategy.parameters["rsi_buy_low"] == 60.0
         # Defaults should still be present
         assert strategy.parameters["rsi_period"] == 14
 
@@ -255,7 +215,7 @@ class TestStrategyConfig:
     async def test_empty_market_data(self):
         strategy = MomentumStrategy()
         signals = await strategy.generate_signals(
-            market_data={},
+            bars={},
             market_regime=MarketRegime.UNKNOWN,
         )
         assert signals == []
