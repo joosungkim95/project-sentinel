@@ -38,13 +38,17 @@ async def test_breakout_no_signal_in_range():
 
 
 @pytest.mark.asyncio
-async def test_breakout_no_signal_low_volume():
+async def test_breakout_low_volume_fires_at_lower_confidence():
+    """With OR logic, breakout without volume still fires but at lower confidence."""
     prices = [100] * 25 + [110]
     volumes = [1000] * 25 + [800]
     bars = _make_bars(prices, volumes)
     strategy = BreakoutStrategy()
     signals = await strategy.generate_signals({"BTC-USD": bars}, MarketRegime.UNKNOWN)
-    assert len(signals) == 0
+    # Breakout detected (price > high) but no volume confirmation
+    # OR-based: should still fire at lower confidence
+    assert len(signals) >= 1
+    assert signals[0].confidence < 0.6  # Lower confidence without volume
 
 
 @pytest.mark.asyncio
@@ -104,15 +108,15 @@ class TestStrategyConfig:
 class TestConfidence:
 
     def test_confidence_bounded(self):
-        conf = BreakoutStrategy._calc_confidence(0.05, 0.5, 0.03)
-        assert 0.1 <= conf <= 1.0
+        conf = BreakoutStrategy._calc_confidence(0.05, 0.5, 0.03, True)
+        assert 0.20 <= conf <= 1.0
 
     def test_bigger_breakout_higher_confidence(self):
-        c1 = BreakoutStrategy._calc_confidence(0.10, 0.5, 0.03)
-        c2 = BreakoutStrategy._calc_confidence(0.01, 0.5, 0.03)
+        c1 = BreakoutStrategy._calc_confidence(0.10, 0.5, 0.03, True)
+        c2 = BreakoutStrategy._calc_confidence(0.01, 0.5, 0.03, True)
         assert c1 > c2
 
     def test_higher_volume_higher_confidence(self):
-        c1 = BreakoutStrategy._calc_confidence(0.05, 1.0, 0.03)
-        c2 = BreakoutStrategy._calc_confidence(0.05, 0.3, 0.03)
+        c1 = BreakoutStrategy._calc_confidence(0.05, 1.0, 0.03, True)
+        c2 = BreakoutStrategy._calc_confidence(0.05, 0.3, 0.03, False)
         assert c1 > c2

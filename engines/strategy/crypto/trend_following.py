@@ -165,25 +165,32 @@ class TrendFollowingStrategy(Strategy):
         adx_trend = self.parameters["adx_trend_threshold"]
         adx_fade = self.parameters["adx_fade_threshold"]
 
-        # --- BUY signal ---
+        # --- BUY signal (OR-relaxed: EMA primary, ADX/price boost) ---
         ema_bullish = current_fast > current_slow
         ema_just_crossed = prev_fast <= prev_slow and current_fast > current_slow
         adx_trending = current_adx > adx_trend
         price_above_ema = current_price > current_fast
 
-        if ema_bullish and adx_trending and price_above_ema:
+        if ema_bullish and (adx_trending or price_above_ema):
             confidence = self._calc_buy_confidence(
                 current_fast, current_slow, current_adx,
                 current_price, ema_just_crossed,
+                adx_trending, price_above_ema,
             )
             quantity = self.parameters["position_size_usd"] / current_price
             stop_loss = current_price - (
                 current_atr * self.parameters["atr_stop_multiplier"]
             )
 
+            triggers = [f"EMA bullish ({current_fast:.2f}>{current_slow:.2f})"]
+            if adx_trending:
+                triggers.append(f"ADX={current_adx:.1f}")
+            if price_above_ema:
+                triggers.append("price>EMA")
+
             logger.info(
-                "Trend BUY: %s FastEMA=%.2f > SlowEMA=%.2f, ADX=%.1f, ATR=%.2f",
-                symbol, current_fast, current_slow, current_adx, current_atr,
+                "Trend BUY: %s %s conf=%.2f",
+                symbol, " + ".join(triggers), confidence,
             )
 
             return [
@@ -198,11 +205,7 @@ class TrendFollowingStrategy(Strategy):
                     confidence=confidence,
                     strength=self._classify_strength(confidence),
                     rationale=(
-                        f"Trend BUY: EMA({self.parameters['fast_ema_period']})="
-                        f"{current_fast:.2f} > EMA({self.parameters['slow_ema_period']})="
-                        f"{current_slow:.2f}, "
-                        f"ADX({self.parameters['adx_period']})={current_adx:.1f} "
-                        f"(>{adx_trend}), "
+                        f"Trend BUY: {' + '.join(triggers)}, "
                         f"ATR stop @ ${stop_loss:,.2f}"
                     ),
                     market_regime=market_regime,
@@ -408,32 +411,36 @@ class TrendFollowingStrategy(Strategy):
         adx: float,
         price: float,
         just_crossed: bool,
+        adx_trending: bool,
+        price_above_ema: bool,
     ) -> float:
-        """Calculate buy confidence from trend indicators."""
-        # EMA spread (0-0.3): wider spread = stronger trend
+        """
+        OR-relaxed confidence: EMA bullish is primary, ADX and price
+        are confluence boosts.
+        """
+        # EMA spread (0.15-0.30): wider = stronger trend
         if slow_ema > 0:
             spread_pct = abs(fast_ema - slow_ema) / slow_ema * 100
         else:
             spread_pct = 0.0
-        ema_score = min(spread_pct / 5.0, 0.3)
+        ema_score = min(0.15 + spread_pct / 6.0, 0.30)
 
-        # ADX contribution (0-0.4): stronger trend = higher
-        adx_score = min((adx - 15.0) / 40.0, 0.4)
-        adx_score = max(adx_score, 0.0)
+        # Fresh crossover bonus (0 or 0.10)
+        cross_bonus = 0.10 if just_crossed else 0.0
 
-        # Fresh crossover bonus (0 or 0.15)
-        cross_bonus = 0.15 if just_crossed else 0.0
+        # ADX confluence (0 or 0.10-0.25)
+        adx_score = 0.0
+        if adx_trending:
+            adx_score = min(0.10 + (adx - 20.0) / 50.0, 0.25)
 
-        # Price above EMA bonus (0-0.15)
-        if fast_ema > 0:
+        # Price above EMA confluence (0 or 0.05-0.15)
+        price_score = 0.0
+        if price_above_ema and fast_ema > 0:
             above_pct = (price - fast_ema) / fast_ema * 100
-        else:
-            above_pct = 0.0
-        price_score = min(above_pct / 3.0, 0.15)
-        price_score = max(price_score, 0.0)
+            price_score = min(0.05 + above_pct / 4.0, 0.15)
 
-        confidence = ema_score + adx_score + cross_bonus + price_score
-        return min(max(confidence, 0.1), 1.0)
+        confidence = ema_score + cross_bonus + adx_score + price_score
+        return min(max(confidence, 0.15), 1.0)
 
     @staticmethod
     def _calc_sell_confidence(

@@ -100,7 +100,7 @@ class TradeResult(BaseModel):
     fill_quantity: Optional[float] = None
     commission: float = 0.0
     slippage: Optional[float] = None  # Difference from target price
-    platform: str  # "alpaca", "coinbase", "polymarket", "kalshi"
+    platform: str  # "alpaca", "coinbase", "kalshi"
     error_message: Optional[str] = None
     timestamp: datetime = Field(default_factory=datetime.utcnow)
 

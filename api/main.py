@@ -36,12 +36,15 @@ from engines.scheduler import TradingScheduler
 
 # Scouts (fast, loose, small bets)
 from engines.strategy.equities.momentum import MomentumStrategy
+from engines.strategy.equities.gap_and_go import GapAndGoStrategy
 from engines.strategy.crypto.breakout import BreakoutStrategy
 from engines.strategy.predictions.value_pricing import MarketSkimmerStrategy
 
 # Core (confirmed setups, balanced)
 from engines.strategy.equities.trend_following import EquityTrendFollowingStrategy
 from engines.strategy.equities.mean_reversion import MeanReversionStrategy
+from engines.strategy.equities.vwap import VWAPStrategy
+from engines.strategy.equities.pullback import PullbackStrategy
 from engines.strategy.crypto.trend_following import TrendFollowingStrategy
 from engines.strategy.predictions.value_pricing import ValuePricingStrategy
 
@@ -54,17 +57,20 @@ logger = logging.getLogger(__name__)
 
 
 def _build_strategies() -> list:
-    """Instantiate all 10 tiered strategies."""
+    """Instantiate all 13 tiered strategies."""
     strategies = [
         # Scouts (fast, loose, small bets)
-        MomentumStrategy(),              # 7 equities, 15min
-        BreakoutStrategy(),              # 5 crypto, 1h
+        MomentumStrategy(),              # 7 equities, 15min, OR-based
+        GapAndGoStrategy(),              # 7 equities, 15min, gap continuation
+        BreakoutStrategy(),              # 5 crypto, 1h, volume as confluence
         MarketSkimmerStrategy(),         # Kalshi scan, realtime
 
         # Core (confirmed setups, balanced)
-        EquityTrendFollowingStrategy(),  # 4 equities, 4h
-        MeanReversionStrategy(),         # 7 equities, 4h
-        TrendFollowingStrategy(),        # 3 crypto, 4h
+        EquityTrendFollowingStrategy(),  # 4 equities, 4h, OR-relaxed
+        MeanReversionStrategy(),         # 7 equities, 4h, OR-based
+        VWAPStrategy(),                  # 7 equities, 15min, VWAP deviation
+        PullbackStrategy(),              # 7 equities, 4h, trend pullback
+        TrendFollowingStrategy(),        # 3 crypto, 4h, OR-relaxed
         ValuePricingStrategy(),          # Kalshi scan, realtime
 
         # Snipers (rare, high-conviction)

@@ -21,7 +21,7 @@ class PlatformAdapter(ABC):
     """
     Abstract adapter for a trading platform.
 
-    Implement one per platform: Alpaca, Coinbase, Polymarket, Kalshi.
+    Implement one per platform: Alpaca, Coinbase, Kalshi.
     """
 
     @property

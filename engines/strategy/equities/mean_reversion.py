@@ -4,19 +4,19 @@ Mean Reversion Strategy — Bollinger Bands + RSI for equities.
 CORE tier: moderate frequency signals on 4-hour bars.
 
 Exploits the tendency of prices to revert to the mean after extreme moves.
-Best in ranging/low-volatility markets. Blocked in downtrend regimes only
-(mean reversion in uptrends is less dangerous than in downtrends).
+Best in ranging/low-volatility markets. Blocked in downtrend regimes only.
 
-Signal logic:
-- BUY: Price touches lower Bollinger Band AND RSI < 40 (oversold)
-- SELL: Price touches upper Bollinger Band AND RSI > 60 (overbought)
+Signal logic (OR-based with confluence boosting confidence):
+- BUY: Price near lower BB (pct_b < 0.15) OR RSI oversold (< 40)
+  Either alone triggers at lower confidence; both = higher confidence.
+- SELL: Price near upper BB (pct_b > 0.85) OR RSI overbought (> 60)
 
 Default parameters:
 - symbols: all 7 equity symbols
 - bb_period: 20
-- bb_std: 1.5 (relaxed from 2.0 for more signals)
-- rsi_oversold: 40.0 (relaxed from 30.0)
-- rsi_overbought: 60.0 (relaxed from 70.0)
+- bb_std: 1.5
+- rsi_oversold: 40.0
+- rsi_overbought: 60.0
 """
 
 import logging
@@ -150,16 +150,23 @@ class MeanReversionStrategy(Strategy):
 
             position_size = self.parameters["position_size_usd"]
 
-            # BUY: price at/below lower band + RSI oversold
-            if (
-                current_price <= current_lower
-                and current_rsi < self.parameters["rsi_oversold"]
-            ):
+            # BUY: price near lower band OR RSI oversold (OR-based)
+            bb_oversold = pct_b < 0.15  # Near or below lower band
+            rsi_oversold = current_rsi < self.parameters["rsi_oversold"]
+
+            if bb_oversold or rsi_oversold:
                 confidence = self._calc_buy_confidence(
-                    pct_b, current_rsi, bb_width
+                    pct_b, current_rsi, bb_width,
+                    bb_oversold, rsi_oversold,
                 )
                 quantity = position_size / current_price
                 take_profit = current_middle
+
+                triggers = []
+                if bb_oversold:
+                    triggers.append(f"%%B={pct_b:.2f}")
+                if rsi_oversold:
+                    triggers.append(f"RSI={current_rsi:.1f}")
 
                 signals.append(
                     Signal(
@@ -175,9 +182,8 @@ class MeanReversionStrategy(Strategy):
                         strength=self._classify_strength(confidence),
                         rationale=(
                             f"Mean Reversion BUY {symbol}: "
-                            f"Price ${current_price:.2f} at lower "
-                            f"BB ${current_lower:.2f}, "
-                            f"RSI={current_rsi:.1f} (oversold). "
+                            f"{' + '.join(triggers)} "
+                            f"({'confluence' if bb_oversold and rsi_oversold else 'single trigger'}). "
                             f"Target: middle band ${current_middle:.2f}"
                         ),
                         market_regime=market_regime,
@@ -186,14 +192,21 @@ class MeanReversionStrategy(Strategy):
                     )
                 )
 
-            # SELL: price at/above upper band + RSI overbought
-            elif (
-                current_price >= current_upper
-                and current_rsi > self.parameters["rsi_overbought"]
-            ):
+            # SELL: price near upper band OR RSI overbought (OR-based)
+            bb_overbought = pct_b > 0.85
+            rsi_overbought = current_rsi > self.parameters["rsi_overbought"]
+
+            if not (bb_oversold or rsi_oversold) and (bb_overbought or rsi_overbought):
                 confidence = self._calc_sell_confidence(
-                    pct_b, current_rsi, bb_width
+                    pct_b, current_rsi, bb_width,
+                    bb_overbought, rsi_overbought,
                 )
+
+                triggers = []
+                if bb_overbought:
+                    triggers.append(f"%%B={pct_b:.2f}")
+                if rsi_overbought:
+                    triggers.append(f"RSI={current_rsi:.1f}")
 
                 signals.append(
                     Signal(
@@ -207,9 +220,8 @@ class MeanReversionStrategy(Strategy):
                         strength=self._classify_strength(confidence),
                         rationale=(
                             f"Mean Reversion SELL {symbol}: "
-                            f"Price ${current_price:.2f} at upper "
-                            f"BB ${current_upper:.2f}, "
-                            f"RSI={current_rsi:.1f} (overbought)."
+                            f"{' + '.join(triggers)} "
+                            f"({'confluence' if bb_overbought and rsi_overbought else 'single trigger'})"
                         ),
                         market_regime=market_regime,
                         position_size_usd=position_size,
@@ -284,30 +296,59 @@ class MeanReversionStrategy(Strategy):
 
     @staticmethod
     def _calc_buy_confidence(
-        pct_b: float, rsi: float, bb_width: float
+        pct_b: float,
+        rsi: float,
+        bb_width: float,
+        bb_triggered: bool,
+        rsi_triggered: bool,
     ) -> float:
-        """Higher confidence when further below band with lower RSI."""
-        # Distance below band (0-0.4)
-        band_score = min(max(-pct_b, 0) * 2, 0.4)
-        # RSI oversold depth (0-0.4)
-        rsi_score = min(max((40 - rsi) / 40, 0) * 0.4, 0.4)
-        # Wider bands = more volatile = less confident (0-0.2)
-        width_penalty = min(bb_width * 2, 0.2)
+        """
+        OR-based confidence: single trigger = lower, confluence = higher.
 
-        confidence = band_score + rsi_score + 0.2 - width_penalty
-        return min(max(confidence, 0.1), 1.0)
+        Single trigger: 0.25-0.45.  Both: 0.45-0.80.
+        """
+        band_score = 0.0
+        rsi_score = 0.0
+
+        if bb_triggered:
+            # Distance below band (0.15-0.40)
+            band_score = min(0.15 + max(-pct_b, 0) * 1.5, 0.40)
+
+        if rsi_triggered:
+            # RSI oversold depth (0.15-0.40)
+            rsi_score = min(0.15 + max((40 - rsi) / 40, 0) * 0.25, 0.40)
+
+        # Wider bands = more volatile = less confident
+        width_penalty = min(bb_width * 1.5, 0.15)
+        # Confluence bonus
+        confluence = 0.10 if (bb_triggered and rsi_triggered) else 0.0
+
+        confidence = band_score + rsi_score + confluence - width_penalty
+        return min(max(confidence, 0.15), 1.0)
 
     @staticmethod
     def _calc_sell_confidence(
-        pct_b: float, rsi: float, bb_width: float
+        pct_b: float,
+        rsi: float,
+        bb_width: float,
+        bb_triggered: bool,
+        rsi_triggered: bool,
     ) -> float:
-        """Higher confidence when further above band with higher RSI."""
-        band_score = min(max(pct_b - 1.0, 0) * 2, 0.4)
-        rsi_score = min(max((rsi - 60) / 40, 0) * 0.4, 0.4)
-        width_penalty = min(bb_width * 2, 0.2)
+        """OR-based sell confidence."""
+        band_score = 0.0
+        rsi_score = 0.0
 
-        confidence = band_score + rsi_score + 0.2 - width_penalty
-        return min(max(confidence, 0.2), 1.0)
+        if bb_triggered:
+            band_score = min(0.15 + max(pct_b - 1.0, 0) * 1.5, 0.40)
+
+        if rsi_triggered:
+            rsi_score = min(0.15 + max((rsi - 60) / 40, 0) * 0.25, 0.40)
+
+        width_penalty = min(bb_width * 1.5, 0.15)
+        confluence = 0.10 if (bb_triggered and rsi_triggered) else 0.0
+
+        confidence = band_score + rsi_score + confluence - width_penalty
+        return min(max(confidence, 0.15), 1.0)
 
     @staticmethod
     def _classify_strength(confidence: float) -> SignalStrength:

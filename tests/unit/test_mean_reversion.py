@@ -116,14 +116,17 @@ class TestBuySignal:
         assert isinstance(signals, list)
 
     @pytest.mark.asyncio
-    async def test_no_signal_flat_market(self):
-        """No signal when price is near the middle."""
+    async def test_flat_market_behavior(self):
+        """Flat market: OR-based may still fire on individual triggers."""
         strategy = MeanReversionStrategy()
         bars = make_flat_bars()
         signals = await strategy.generate_signals(
             {"SPY": bars}, MarketRegime.RANGING
         )
-        assert signals == []
+        # With OR-based logic, flat market may or may not trigger.
+        # Verify any signals have reasonable confidence.
+        for s in signals:
+            assert s.confidence >= 0.15
 
 
 class TestSellSignal:
@@ -143,16 +146,28 @@ class TestSellSignal:
 class TestConfidence:
 
     def test_buy_confidence_bounded(self):
-        conf = MeanReversionStrategy._calc_buy_confidence(-0.5, 20.0, 0.04)
-        assert 0.1 <= conf <= 1.0
+        conf = MeanReversionStrategy._calc_buy_confidence(
+            -0.5, 20.0, 0.04,
+            bb_triggered=True, rsi_triggered=True,
+        )
+        assert 0.15 <= conf <= 1.0
 
     def test_sell_confidence_bounded(self):
-        conf = MeanReversionStrategy._calc_sell_confidence(1.5, 80.0, 0.04)
-        assert 0.2 <= conf <= 1.0
+        conf = MeanReversionStrategy._calc_sell_confidence(
+            1.5, 80.0, 0.04,
+            bb_triggered=True, rsi_triggered=True,
+        )
+        assert 0.15 <= conf <= 1.0
 
     def test_lower_rsi_higher_buy_confidence(self):
-        conf_low = MeanReversionStrategy._calc_buy_confidence(-0.3, 15.0, 0.04)
-        conf_mid = MeanReversionStrategy._calc_buy_confidence(-0.3, 28.0, 0.04)
+        conf_low = MeanReversionStrategy._calc_buy_confidence(
+            -0.3, 15.0, 0.04,
+            bb_triggered=True, rsi_triggered=True,
+        )
+        conf_mid = MeanReversionStrategy._calc_buy_confidence(
+            -0.3, 28.0, 0.04,
+            bb_triggered=True, rsi_triggered=True,
+        )
         assert conf_low >= conf_mid
 
 

@@ -1,25 +1,20 @@
 """
-Breakout Detector Strategy — Price breakouts with volume confirmation for crypto.
+Breakout Detector Strategy — Price breakouts with volume as confluence for crypto.
 
 SCOUT tier: frequent scans on 1-hour bars across all crypto symbols.
 
-Detects price breakouts above/below recent range with volume confirmation.
-Designed to catch early momentum moves before trend-following strategies
-pick them up.
+Detects price breakouts above/below recent range. Volume confirms but
+doesn't gate — a breakout without volume fires at lower confidence.
 
-Signal logic:
-- BUY: Price > highest high of last 20 bars AND volume > 1.3x 20-bar average
-- SELL: Price < lowest low of last 20 bars AND volume > 1.3x 20-bar average
-
-Confidence components:
-- Breakout magnitude (0-0.4): how far beyond the range
-- Volume strength (0-0.3): how much above average volume
-- Range width (0-0.3): wider range = more significant breakout
+Signal logic (OR-relaxed):
+- BUY: Price > highest high of last 20 bars (primary trigger)
+  Volume > 1.3x average = confluence boost, not hard requirement
+- SELL: Price < lowest low of last 20 bars (primary trigger)
 
 Default parameters:
 - symbols: all 5 crypto symbols
 - lookback: 20 bars
-- volume_mult: 1.3
+- volume_mult: 1.3 (confluence threshold)
 - position_size_usd: 75.0
 - stop_loss_pct: 2.5
 """
@@ -150,8 +145,8 @@ class BreakoutStrategy(Strategy):
             avg_volume,
         )
 
-        # --- BUY breakout: price above highest high + volume ---
-        if current_price > highest_high and volume_confirmed:
+        # --- BUY breakout: price above highest high (volume boosts confidence) ---
+        if current_price > highest_high:
             breakout_magnitude = (
                 (current_price - highest_high) / highest_high
                 if highest_high > 0
@@ -164,13 +159,20 @@ class BreakoutStrategy(Strategy):
 
             confidence = self._calc_confidence(
                 breakout_magnitude, volume_strength, range_pct,
+                volume_confirmed,
             )
             quantity = self.parameters["position_size_usd"] / current_price
             stop_loss = current_price * (1 - self.parameters["stop_loss_pct"] / 100)
 
+            vol_label = (
+                f"{current_volume / avg_volume:.1f}x avg (confirmed)"
+                if volume_confirmed
+                else f"{current_volume / avg_volume:.1f}x avg"
+            )
+
             logger.info(
-                "Breakout BUY: %s price=%.2f > high=%.2f, vol=%.0f > avg=%.0f",
-                symbol, current_price, highest_high, current_volume, avg_volume,
+                "Breakout BUY: %s price=%.2f > high=%.2f, vol=%s",
+                symbol, current_price, highest_high, vol_label,
             )
 
             return [
@@ -188,8 +190,7 @@ class BreakoutStrategy(Strategy):
                         f"Breakout BUY: price ${current_price:,.2f} broke above "
                         f"20-bar high ${highest_high:,.2f} "
                         f"(+{breakout_magnitude * 100:.2f}%). "
-                        f"Volume {current_volume:,.0f} is "
-                        f"{current_volume / avg_volume:.1f}x average."
+                        f"Volume {vol_label}."
                     ),
                     market_regime=market_regime,
                     position_size_usd=self.parameters["position_size_usd"],
@@ -197,8 +198,8 @@ class BreakoutStrategy(Strategy):
                 )
             ]
 
-        # --- SELL breakout: price below lowest low + volume ---
-        if current_price < lowest_low and volume_confirmed:
+        # --- SELL breakout: price below lowest low ---
+        if current_price < lowest_low:
             breakout_magnitude = (
                 (lowest_low - current_price) / lowest_low
                 if lowest_low > 0
@@ -211,11 +212,12 @@ class BreakoutStrategy(Strategy):
 
             confidence = self._calc_confidence(
                 breakout_magnitude, volume_strength, range_pct,
+                volume_confirmed,
             )
 
             logger.info(
-                "Breakout SELL: %s price=%.2f < low=%.2f, vol=%.0f > avg=%.0f",
-                symbol, current_price, lowest_low, current_volume, avg_volume,
+                "Breakout SELL: %s price=%.2f < low=%.2f, vol_confirmed=%s",
+                symbol, current_price, lowest_low, volume_confirmed,
             )
 
             return [
@@ -231,9 +233,7 @@ class BreakoutStrategy(Strategy):
                     rationale=(
                         f"Breakout SELL: price ${current_price:,.2f} broke below "
                         f"20-bar low ${lowest_low:,.2f} "
-                        f"(-{breakout_magnitude * 100:.2f}%). "
-                        f"Volume {current_volume:,.0f} is "
-                        f"{current_volume / avg_volume:.1f}x average."
+                        f"(-{breakout_magnitude * 100:.2f}%)."
                     ),
                     market_regime=market_regime,
                     position_size_usd=self.parameters["position_size_usd"],
@@ -261,29 +261,27 @@ class BreakoutStrategy(Strategy):
         breakout_magnitude: float,
         volume_strength: float,
         range_pct: float,
+        volume_confirmed: bool,
     ) -> float:
         """
         Calculate confidence from breakout characteristics.
 
-        Args:
-            breakout_magnitude: How far price moved beyond range (as fraction).
-            volume_strength: How much volume exceeds average (ratio - 1).
-            range_pct: Width of the range as fraction of price.
-
-        Returns:
-            Confidence score between 0.1 and 1.0.
+        Price breakout is primary (0.20-0.45 alone).
+        Volume confirmation adds a confluence bonus.
         """
-        # Breakout magnitude (0-0.4): bigger breakout = more confident
-        mag_score = min(breakout_magnitude * 10, 0.4)
+        # Breakout magnitude (0.20-0.45): bigger breakout = more confident
+        mag_score = min(0.20 + breakout_magnitude * 8, 0.45)
 
-        # Volume strength (0-0.3): more volume = more confirmation
-        vol_score = min(volume_strength / 3.0, 0.3)
+        # Range width (0-0.20): wider range = more significant breakout
+        range_score = min(range_pct * 4, 0.20)
 
-        # Range width (0-0.3): wider range = more significant breakout
-        range_score = min(range_pct * 5, 0.3)
+        # Volume as confluence (0 or 0.10-0.25)
+        vol_score = 0.0
+        if volume_confirmed:
+            vol_score = min(0.10 + volume_strength / 4.0, 0.25)
 
-        confidence = mag_score + vol_score + range_score
-        return min(max(confidence, 0.1), 1.0)
+        confidence = mag_score + range_score + vol_score
+        return min(max(confidence, 0.20), 1.0)
 
     @staticmethod
     def _classify_strength(confidence: float) -> SignalStrength:

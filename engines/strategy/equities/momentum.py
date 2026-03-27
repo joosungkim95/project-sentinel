@@ -3,9 +3,11 @@ Momentum Scalp Strategy — RSI + Volume for equities.
 
 SCOUT tier: frequent, small signals on 15-minute bars across all equity symbols.
 
-Signal logic (loosened for scout tier):
-- BUY: RSI >= 55 (building momentum) AND volume > 1.0x avg
-- SELL: RSI < 30 (momentum lost)
+Signal logic (OR-based with confluence boosting confidence):
+- BUY: RSI shows momentum (>= 50) OR volume above average (>= 1.0x)
+  Either condition alone triggers at lower confidence.
+  Both confirming = higher confidence.
+- SELL: RSI < 35 (momentum lost)
 
 Default parameters:
 - symbols: all 7 equity symbols
@@ -49,12 +51,12 @@ class MomentumStrategy(Strategy):
     ):
         default_params = {
             "rsi_period": 14,
-            "rsi_buy_low": 55.0,         # Loosened from 50
-            "rsi_buy_high": 85.0,         # Loosened from 70
-            "rsi_sell_threshold": 30.0,
+            "rsi_buy_low": 50.0,          # OR-based: lower threshold
+            "rsi_buy_high": 85.0,
+            "rsi_sell_threshold": 35.0,
             "volume_ma_period": 20,
-            "volume_multiplier": 1.0,     # Loosened from 1.2
-            "position_size_usd": 75.0,    # Small scout size (was 500)
+            "volume_multiplier": 1.0,     # Volume confirms but doesn't gate
+            "position_size_usd": 75.0,    # Small scout size
         }
         if parameters:
             default_params.update(parameters)
@@ -125,26 +127,34 @@ class MomentumStrategy(Strategy):
                 current_vol_ratio,
             )
 
-            # --- BUY signal ---
+            # --- BUY signal (OR-based: either condition triggers) ---
             rsi_buy_low = self.parameters["rsi_buy_low"]
             rsi_buy_high = self.parameters["rsi_buy_high"]
             vol_multiplier = self.parameters["volume_multiplier"]
             position_size = self.parameters["position_size_usd"]
 
-            if (
-                rsi_buy_low <= current_rsi <= rsi_buy_high
-                and current_vol_ratio >= vol_multiplier
-            ):
+            rsi_bullish = rsi_buy_low <= current_rsi <= rsi_buy_high
+            volume_strong = current_vol_ratio >= vol_multiplier
+            # Don't buy when RSI is in sell territory
+            rsi_not_bearish = current_rsi >= self.parameters["rsi_sell_threshold"]
+
+            if rsi_not_bearish and (rsi_bullish or volume_strong):
                 confidence = self._calc_buy_confidence(
-                    current_rsi, current_vol_ratio
+                    current_rsi, current_vol_ratio,
+                    rsi_bullish, volume_strong,
                 )
                 quantity = position_size / current_price
 
+                triggers = []
+                if rsi_bullish:
+                    triggers.append(f"RSI={current_rsi:.1f}")
+                if volume_strong:
+                    triggers.append(f"Vol={current_vol_ratio:.2f}x")
+
                 logger.info(
-                    "Momentum BUY: %s RSI=%.1f Vol=%.2fx conf=%.2f",
+                    "Momentum BUY: %s %s conf=%.2f",
                     symbol,
-                    current_rsi,
-                    current_vol_ratio,
+                    " + ".join(triggers),
                     confidence,
                 )
 
@@ -160,9 +170,8 @@ class MomentumStrategy(Strategy):
                         strength=self._classify_strength(confidence),
                         rationale=(
                             f"Momentum BUY {symbol}: "
-                            f"RSI({self.parameters['rsi_period']})={current_rsi:.1f} "
-                            f"(in {rsi_buy_low}-{rsi_buy_high} zone), "
-                            f"Volume {current_vol_ratio:.2f}x avg"
+                            f"{' + '.join(triggers)} "
+                            f"({'confluence' if rsi_bullish and volume_strong else 'single trigger'})"
                         ),
                         market_regime=market_regime,
                         position_size_usd=position_size,
@@ -281,21 +290,35 @@ class MomentumStrategy(Strategy):
         return ratio
 
     @staticmethod
-    def _calc_buy_confidence(rsi: float, vol_ratio: float) -> float:
+    def _calc_buy_confidence(
+        rsi: float,
+        vol_ratio: float,
+        rsi_bullish: bool,
+        volume_strong: bool,
+    ) -> float:
         """
-        Calculate buy confidence from indicator confluence.
+        Calculate buy confidence with OR-based confluence.
 
-        Higher RSI in sweet spot and strong volume = higher confidence.
+        Single trigger = base confidence (0.25-0.45).
+        Both triggers = boosted confidence (0.45-0.80).
         """
-        # RSI contribution (0-0.5): closer to 65 (sweet spot) = higher
-        rsi_distance_from_sweet = abs(rsi - 65.0)
-        rsi_score = max(0.5 - (rsi_distance_from_sweet / 60.0), 0.0)
+        rsi_score = 0.0
+        vol_score = 0.0
 
-        # Volume contribution (0-0.5): higher ratio = higher
-        vol_score = min((vol_ratio - 0.8) / 3.0, 0.5)
+        if rsi_bullish:
+            # RSI contribution (0.15-0.40): closer to 65 = higher
+            rsi_distance_from_sweet = abs(rsi - 65.0)
+            rsi_score = max(0.40 - (rsi_distance_from_sweet / 50.0), 0.15)
 
-        confidence = rsi_score + vol_score
-        return min(max(confidence, 0.1), 1.0)
+        if volume_strong:
+            # Volume contribution (0.15-0.40): higher ratio = higher
+            vol_score = min(0.15 + (vol_ratio - 1.0) / 3.0, 0.40)
+
+        # Confluence bonus: both triggers confirming
+        confluence_bonus = 0.10 if (rsi_bullish and volume_strong) else 0.0
+
+        confidence = rsi_score + vol_score + confluence_bonus
+        return min(max(confidence, 0.15), 1.0)
 
     @staticmethod
     def _calc_sell_confidence(rsi: float) -> float:

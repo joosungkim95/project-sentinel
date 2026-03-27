@@ -229,6 +229,7 @@ class TestConfidence:
         conf = TrendFollowingStrategy._calc_buy_confidence(
             fast_ema=51000.0, slow_ema=50000.0,
             adx=35.0, price=51500.0, just_crossed=True,
+            adx_trending=True, price_above_ema=True,
         )
         assert 0.0 < conf <= 1.0
 
@@ -243,10 +244,12 @@ class TestConfidence:
         no_cross = TrendFollowingStrategy._calc_buy_confidence(
             fast_ema=51000.0, slow_ema=50000.0,
             adx=30.0, price=51500.0, just_crossed=False,
+            adx_trending=True, price_above_ema=True,
         )
         with_cross = TrendFollowingStrategy._calc_buy_confidence(
             fast_ema=51000.0, slow_ema=50000.0,
             adx=30.0, price=51500.0, just_crossed=True,
+            adx_trending=True, price_above_ema=True,
         )
         assert with_cross > no_cross
 
