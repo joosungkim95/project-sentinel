@@ -277,6 +277,7 @@ class AlpacaAdapter:
                 "5Min": TimeFrame(5, "Min"),
                 "15Min": TimeFrame(15, "Min"),
                 "1Hour": TimeFrame.Hour,
+                "4Hour": TimeFrame(4, "Hour"),
                 "1Day": TimeFrame.Day,
             }
 

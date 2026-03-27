@@ -35,6 +35,32 @@ logger = logging.getLogger(__name__)
 DEFAULT_BARS_LIMIT = 100
 
 
+def aggregate_bars(bars: list[dict], factor: int = 4) -> list[dict]:
+    """Aggregate smaller timeframe bars into larger ones.
+
+    Args:
+        bars: List of OHLCV bar dicts, ordered chronologically.
+        factor: Number of bars to combine (e.g., 4 for 1h->4h).
+
+    Returns:
+        Aggregated bars. Partial groups at the end are dropped.
+    """
+    if not bars:
+        return []
+    result = []
+    for i in range(0, len(bars) - factor + 1, factor):
+        group = bars[i : i + factor]
+        result.append({
+            "open": group[0]["open"],
+            "high": max(b["high"] for b in group),
+            "low": min(b["low"] for b in group),
+            "close": group[-1]["close"],
+            "volume": sum(b["volume"] for b in group),
+            "timestamp": group[0]["timestamp"],
+        })
+    return result
+
+
 class TradingPipeline:
     """
     Orchestrates the full trading loop:
