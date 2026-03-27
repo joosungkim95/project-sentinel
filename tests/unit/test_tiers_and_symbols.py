@@ -90,3 +90,15 @@ def test_signal_tier_defaults_to_core():
     signal = _make_test_signal()
     from config.tiers import StrategyTier
     assert signal.tier == StrategyTier.CORE
+
+
+def test_strategy_base_has_tier_and_symbols():
+    """Verify the base class constructor accepts tier, symbols, timeframe, max_signals_per_cycle."""
+    import inspect
+    from engines.strategy.base import Strategy
+    sig = inspect.signature(Strategy.__init__)
+    params = list(sig.parameters.keys())
+    assert "tier" in params
+    assert "symbols" in params
+    assert "timeframe" in params
+    assert "max_signals_per_cycle" in params

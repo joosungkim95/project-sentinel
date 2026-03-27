@@ -15,6 +15,7 @@ Adding a new strategy:
 from abc import ABC, abstractmethod
 from typing import Any
 
+from config.tiers import StrategyTier
 from engines.models import (
     AssetClass,
     MarketRegime,
@@ -32,23 +33,32 @@ class Strategy(ABC):
         strategy_id: str,
         asset_class: AssetClass,
         parameters: dict[str, Any],
+        tier: StrategyTier = StrategyTier.CORE,
+        symbols: list[str] | None = None,
+        timeframe: str = "1Day",
+        max_signals_per_cycle: int = 3,
     ):
         self.strategy_id = strategy_id
         self.asset_class = asset_class
         self.parameters = parameters
+        self.tier = tier
+        self.symbols = symbols if symbols is not None else [parameters.get("symbol", "")]
+        self.timeframe = timeframe
+        self.max_signals_per_cycle = max_signals_per_cycle
         self.status: StrategyStatus = StrategyStatus.PAPER_TESTING
 
     @abstractmethod
     async def generate_signals(
         self,
-        market_data: dict[str, Any],
+        bars: dict[str, list[dict]],
         market_regime: MarketRegime,
     ) -> list[Signal]:
         """
-        Analyze market data and generate trade signals.
+        Generate trading signals from bar data.
 
         Args:
-            market_data: Current market data (prices, volumes, indicators).
+            bars: Bar data keyed by symbol. Each value is a list of
+                OHLCV dicts sorted oldest-first.
             market_regime: Current classified market regime.
 
         Returns:
