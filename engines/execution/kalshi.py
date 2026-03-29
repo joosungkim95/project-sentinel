@@ -258,6 +258,47 @@ class KalshiAdapter:
             logger.error("Failed to get markets: %s", e)
             return []
 
+    async def get_crypto_markets(
+        self, series_ticker: str = "KXBTC", limit: int = 50,
+    ) -> list[dict]:
+        """Get crypto price-level markets filtered by series ticker.
+
+        Returns markets with full pricing data including close_time and
+        strike_price for probability model consumption.
+
+        Args:
+            series_ticker: Kalshi series ticker to filter by (e.g., "KXBTC", "KXETH").
+            limit: Maximum number of markets to return.
+
+        Returns:
+            List of market dicts with prices converted from cents to dollars,
+            including yes_bid, no_bid, yes_ask, no_ask, close_time, strike_price.
+        """
+        try:
+            params: dict[str, Any] = {
+                "limit": limit, "status": "open", "series_ticker": series_ticker,
+            }
+            data = await self._get("/markets", params=params)
+            return [
+                {
+                    "ticker": m.get("ticker"),
+                    "title": m.get("title"),
+                    "yes_bid": m.get("yes_bid", 0) / 100,
+                    "no_bid": m.get("no_bid", 0) / 100,
+                    "yes_ask": m.get("yes_ask", 0) / 100,
+                    "no_ask": m.get("no_ask", 0) / 100,
+                    "volume": m.get("volume", 0),
+                    "open_interest": m.get("open_interest", 0),
+                    "status": m.get("status"),
+                    "close_time": m.get("close_time"),
+                    "strike_price": m.get("strike_price"),
+                }
+                for m in data.get("markets", [])
+            ]
+        except Exception as e:
+            logger.error("Failed to get crypto markets (series=%s): %s", series_ticker, e)
+            return []
+
     async def execute_trade(
         self, risk_result: RiskCheckResult
     ) -> TradeResult:
