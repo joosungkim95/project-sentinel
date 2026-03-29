@@ -324,10 +324,10 @@ class CryptoProbabilityStrategy(Strategy):
         Calculate signal confidence from edge, Kelly fraction, spread, and volume.
 
         Components:
-        - Edge magnitude: 0–0.40 (capped at 25pp edge)
-        - Kelly fraction: 0–0.30 (capped at 0.5 kelly)
+        - Edge magnitude: 0–0.45 (capped at 15pp edge)
+        - Kelly fraction: 0–0.25 (capped at 0.3 kelly)
         - Spread tightness: 0–0.15 (tighter = better)
-        - Volume: 0–0.15 (higher = better)
+        - Volume: 0–0.15 (capped at 500 contracts)
 
         Args:
             opp: Opportunity dict with edge_pp, kelly, yes_spread, volume.
@@ -340,18 +340,18 @@ class CryptoProbabilityStrategy(Strategy):
         yes_spread = opp["yes_spread"]
         volume = opp["volume"]
 
-        # Edge contribution (0-0.40): 25pp = full score
-        edge_score = min(edge_pp / 25.0, 1.0) * 0.40
+        # Edge contribution (0-0.45): 15pp = full score
+        edge_score = min(edge_pp / 15.0, 1.0) * 0.45
 
-        # Kelly contribution (0-0.30): kelly=0.5 = full score
-        kelly_score = min(kelly / 0.5, 1.0) * 0.30
+        # Kelly contribution (0-0.25): kelly=0.3 = full score
+        kelly_score = min(kelly / 0.3, 1.0) * 0.25
 
         # Spread tightness (0-0.15): 0 spread = full, max_spread = 0
         max_spread = 0.05
         spread_score = max(1.0 - yes_spread / max_spread, 0.0) * 0.15
 
-        # Volume contribution (0-0.15): 2000 contracts = full score
-        vol_score = min(volume / 2000.0, 1.0) * 0.15
+        # Volume contribution (0-0.15): 500 contracts = full score
+        vol_score = min(volume / 500.0, 1.0) * 0.15
 
         confidence = edge_score + kelly_score + spread_score + vol_score
         return min(max(confidence, 0.1), 1.0)

@@ -345,6 +345,18 @@ class TradingPipeline:
                         bars={"markets": pred_data.get("markets", [])},
                         market_regime=market_regime,
                     )
+                    if signals:
+                        confs = [f"{s.symbol}={s.confidence:.3f}" for s in signals]
+                        logger.info(
+                            "SIGNALS %s: %d signals [%s]",
+                            strategy.strategy_id, len(signals), ", ".join(confs),
+                        )
+                    else:
+                        n_markets = len(pred_data.get("markets", []))
+                        logger.debug(
+                            "SIGNALS %s: 0 signals (%d markets scanned)",
+                            strategy.strategy_id, n_markets,
+                        )
                     for signal in signals:
                         result = await self._evaluate_and_execute(signal)
                         if result is not None:
@@ -394,6 +406,18 @@ class TradingPipeline:
                     bars=strategy_bars,
                     market_regime=market_regime,
                 )
+                if signals:
+                    confs = [f"{s.symbol}={s.confidence:.3f}" for s in signals]
+                    logger.info(
+                        "SIGNALS %s: %d signals [%s]",
+                        strategy.strategy_id, len(signals), ", ".join(confs),
+                    )
+                else:
+                    logger.debug(
+                        "SIGNALS %s: 0 signals (bars: %s)",
+                        strategy.strategy_id,
+                        ", ".join(f"{k}:{len(v)}bars" for k, v in strategy_bars.items()),
+                    )
                 for signal in signals:
                     result = await self._evaluate_and_execute(signal)
                     if result is not None:
