@@ -27,6 +27,7 @@ dependencies = [
     # Data & Analysis
     "pandas>=2.2.0",
     "numpy>=1.26.0",
+    "scipy>=1.12.0",
 
     # Claude API (Learning Engine)
     "anthropic>=0.40.0",
