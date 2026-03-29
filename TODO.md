@@ -67,6 +67,40 @@
 - [x] Full system monitoring dashboard (risk events, system health, learning engine panels + /risk-events, /performance, /system-health, /learning API endpoints)
 - [x] Runbook for manual intervention (docs/RUNBOOK.md — emergency procedures, routine ops, shadow mode promotion, monitoring checklists)
 
+## Phase 5 — Complete
+- [x] Tiered strategy portfolio v2: scout/core/sniper system with non-overlapping signal types
+- [x] Symbol universe expansion: 7 equities (SPY, QQQ, AAPL, MSFT, NVDA, IWM, DIA), 5 crypto (BTC, ETH, SOL, AVAX, DOGE)
+- [x] Multi-timeframe support: 15min (scouts), 4h (core), daily (snipers) — pipeline passes timeframe to adapters
+- [x] Bar aggregation utility: 1h→4h for Coinbase (no native 4h granularity)
+- [x] Tier-aware risk rules: TierBudgetRule (20/50/30%), ConfidenceGateRule (0.3/0.5/0.7), expanded correlation groups
+- [x] Tier-based scheduler: separate job groups per (tier, asset_class) with different intervals
+- [x] 10 strategies: momentum scalp, breakout detector, market skimmer, equity trend, mean reversion, crypto trend, value pricing, SMA cross, vol regime shift, news catalyst
+- [x] Signal drought detector: daily monitoring, Discord alerts with parameter adjustment suggestions
+
+## Phase 6 — Complete
+- [x] Signal drought fix: lowered confidence gates (scout 0.3→0.2, core 0.5→0.4)
+- [x] Drought detector fix: per-job signal tracking instead of global count
+- [x] Rejection logging: ConfidenceGateRule now logs every rejection for diagnosis
+- [x] KCS-02: Implied probability vs spot divergence strategy (log-normal model, half-Kelly sizing)
+- [x] Shared probability model: calc_realized_vol, calc_binary_probability, calc_half_kelly
+- [x] Kalshi adapter: get_crypto_markets with series_ticker filter, expiry/strike data
+- [x] Pipeline: crypto bars fetched from Coinbase for probability-model strategies
+- [x] Macro catalyst calendar: FOMC, CPI, NFP dates for 2026
+
+## Next Up
+- [ ] Monitor tiered strategies for 1 week (rollback if shadow P&L > -5%)
+- [ ] Promote from shadow mode to larger position sizes once strategies prove profitable
+- [ ] Implement proper market regime classifier (currently hardcoded to UNKNOWN)
+
+## Kalshi Crypto Strategy Roadmap (KCS)
+- [x] KCS-02: Implied probability vs spot divergence (probability model + strategy)
+- [x] Macro catalyst calendar (FOMC, CPI, NFP dates for 2026)
+- [ ] KCS-05: Event catalyst pre-positioning (uses KCS-02 model + macro calendar)
+- [ ] KCS-07: Crypto spot hedge via Kalshi binary contracts (Risk Engine integration)
+- [ ] KCS-04: Bracketed range straddle (multi-leg, uses vol model)
+- [ ] KCS-03: 15-minute momentum scalp (requires WebSocket)
+- [ ] KCS-06: Passive market making (requires WebSocket + elevated rate limits)
+
 ---
 
 ## Completed
