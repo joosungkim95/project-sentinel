@@ -95,7 +95,7 @@
 ## Kalshi Crypto Strategy Roadmap (KCS)
 - [x] KCS-02: Implied probability vs spot divergence (probability model + strategy)
 - [x] Macro catalyst calendar (FOMC, CPI, NFP dates for 2026)
-- [ ] KCS-05: Event catalyst pre-positioning (uses KCS-02 model + macro calendar)
+- [x] KCS-05: Event catalyst pre-positioning (sniper tier, vol-bumped prob model + macro calendar)
 - [ ] KCS-07: Crypto spot hedge via Kalshi binary contracts (Risk Engine integration)
 - [ ] KCS-04: Bracketed range straddle (multi-leg, uses vol model)
 - [ ] KCS-03: 15-minute momentum scalp (requires WebSocket)

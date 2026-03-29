@@ -53,12 +53,13 @@ from engines.strategy.equities.sma_crossover import SMACrossoverStrategy
 from engines.strategy.crypto.volatility_harvest import VolatilityHarvestStrategy
 from engines.strategy.predictions.news_driven import NewsDrivenStrategy
 from engines.strategy.predictions.crypto_probability import CryptoProbabilityStrategy
+from engines.strategy.predictions.event_catalyst import EventCatalystStrategy
 
 logger = logging.getLogger(__name__)
 
 
 def _build_strategies() -> list:
-    """Instantiate all 14 tiered strategies."""
+    """Instantiate all 15 tiered strategies."""
     strategies = [
         # Scouts (fast, loose, small bets)
         MomentumStrategy(),              # 7 equities, 15min, OR-based
@@ -79,6 +80,7 @@ def _build_strategies() -> list:
         SMACrossoverStrategy(),          # 3 equities, daily
         VolatilityHarvestStrategy(),     # 2 crypto, daily
         NewsDrivenStrategy(),            # Kalshi scan, realtime
+        EventCatalystStrategy(),         # KCS-05: pre-event positioning, realtime
     ]
 
     for s in strategies:

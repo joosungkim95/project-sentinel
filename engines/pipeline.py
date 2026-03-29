@@ -274,8 +274,11 @@ class TradingPipeline:
                 strategy.strategy_id,
             )
 
-            # Fetch crypto bars for probability-model strategies (KCS-02)
-            if hasattr(strategy, 'strategy_id') and 'prob' in strategy.strategy_id:
+            # Fetch crypto bars for probability-model strategies (KCS-02, KCS-05)
+            needs_crypto = getattr(strategy, 'needs_crypto_bars', False)
+            if not needs_crypto and hasattr(strategy, 'strategy_id'):
+                needs_crypto = 'prob' in strategy.strategy_id or 'catalyst' in strategy.strategy_id
+            if needs_crypto:
                 coinbase = self.executor._adapters.get(AssetClass.CRYPTO)
                 if coinbase:
                     try:
