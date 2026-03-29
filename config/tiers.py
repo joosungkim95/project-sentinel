@@ -16,8 +16,8 @@ TIER_RISK_BUDGET: dict[StrategyTier, float] = {
 }
 
 TIER_CONFIDENCE_THRESHOLD: dict[StrategyTier, float] = {
-    StrategyTier.SCOUT: 0.3,
-    StrategyTier.CORE: 0.5,
+    StrategyTier.SCOUT: 0.2,
+    StrategyTier.CORE: 0.4,
     StrategyTier.SNIPER: 0.7,
 }
 

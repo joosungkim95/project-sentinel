@@ -63,16 +63,16 @@ def _make_portfolio(total_value: float = 10_000.0) -> PortfolioSnapshot:
 
 class TestConfidenceGateRule:
     def test_scout_passes_at_threshold(self):
-        """Scout tier threshold is 0.3 — exactly 0.3 should pass."""
+        """Scout tier threshold is 0.2 — exactly 0.2 should pass."""
         rule = ConfidenceGateRule()
-        signal = _make_signal(confidence=0.3, tier=StrategyTier.SCOUT)
+        signal = _make_signal(confidence=0.2, tier=StrategyTier.SCOUT)
         result = rule.check(signal, _make_portfolio(), signal.quantity)
         assert not result.rejected
 
     def test_scout_fails_below_threshold(self):
-        """Scout tier threshold is 0.3 — 0.2 should be rejected."""
+        """Scout tier threshold is 0.2 — 0.1 should be rejected."""
         rule = ConfidenceGateRule()
-        signal = _make_signal(confidence=0.2, tier=StrategyTier.SCOUT)
+        signal = _make_signal(confidence=0.1, tier=StrategyTier.SCOUT)
         result = rule.check(signal, _make_portfolio(), signal.quantity)
         assert result.rejected
         assert "confidence" in result.reason.lower()
@@ -91,10 +91,10 @@ class TestConfidenceGateRule:
         result = rule.check(signal, _make_portfolio(), signal.quantity)
         assert not result.rejected
 
-    def test_core_passes_at_0_5(self):
-        """Core tier threshold is 0.5."""
+    def test_core_passes_at_0_4(self):
+        """Core tier threshold is 0.4."""
         rule = ConfidenceGateRule()
-        signal = _make_signal(confidence=0.5, tier=StrategyTier.CORE)
+        signal = _make_signal(confidence=0.4, tier=StrategyTier.CORE)
         result = rule.check(signal, _make_portfolio(), signal.quantity)
         assert not result.rejected
 

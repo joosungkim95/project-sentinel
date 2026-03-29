@@ -134,7 +134,7 @@ class TestScoutGeneratesSignals:
             assert sig.tier == StrategyTier.SCOUT
             assert sig.asset_class == AssetClass.EQUITIES
             assert sig.side == Side.BUY
-            assert sig.confidence >= 0.3  # SCOUT ConfidenceGate threshold
+            assert sig.confidence >= 0.2  # SCOUT ConfidenceGate threshold
 
 
 # ---------------------------------------------------------------------------
@@ -144,7 +144,7 @@ class TestScoutGeneratesSignals:
 class TestRiskEngineFiltersByTierConfidence:
     def test_scout_signal_at_0_35_passes_confidence_gate(self):
         """
-        SCOUT tier has a confidence threshold of 0.3.
+        SCOUT tier has a confidence threshold of 0.2.
         A signal with confidence=0.35 must pass ConfidenceGateRule.
         """
         engine = _make_risk_engine()
@@ -157,7 +157,7 @@ class TestRiskEngineFiltersByTierConfidence:
             "confidence" not in r.lower() for r in result.rejection_reasons
         ), (
             "SCOUT signal at 0.35 confidence should not be rejected by "
-            "ConfidenceGateRule (threshold=0.3)."
+            "ConfidenceGateRule (threshold=0.2)."
         )
 
     def test_sniper_signal_at_0_35_rejected_by_confidence_gate(self):
