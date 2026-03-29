@@ -80,6 +80,10 @@ def calc_half_kelly(
 ) -> float:
     """Calculate half-Kelly fraction for a binary bet.
 
+    For YES side edge (model > market): f = (p_model - p_market) / (1 - p_market)
+    For NO side edge (model < market): f = (p_market - p_model) / p_market
+    Returns the half-Kelly (f/2) for whichever side has edge, or 0.
+
     Args:
         model_prob: Model's estimated probability of YES.
         market_prob: Market's implied probability (YES price).
@@ -88,7 +92,9 @@ def calc_half_kelly(
         Half-Kelly fraction (0.0 to ~0.5). 0.0 if no edge.
     """
     if model_prob > market_prob and market_prob < 1.0:
-        # Only bet when we have positive edge (model thinks YES is more likely than market)
         kelly = (model_prob - market_prob) / (1.0 - market_prob)
+        return max(kelly / 2.0, 0.0)
+    if model_prob < market_prob and market_prob > 0.0:
+        kelly = (market_prob - model_prob) / market_prob
         return max(kelly / 2.0, 0.0)
     return 0.0

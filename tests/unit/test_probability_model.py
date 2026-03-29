@@ -91,7 +91,12 @@ class TestCalcHalfKelly:
         result = calc_half_kelly(model_prob=0.50, market_prob=0.50)
         assert result == 0.0
 
-    def test_negative_edge(self):
-        """Model prob < market prob should yield 0.0 (no bet)."""
+    def test_no_side_edge(self):
+        """Model prob < market prob → positive kelly (NO side bet)."""
         result = calc_half_kelly(model_prob=0.30, market_prob=0.50)
+        assert 0.0 < result < 1.0
+
+    def test_truly_no_edge(self):
+        """Identical probs → zero kelly on both sides."""
+        result = calc_half_kelly(model_prob=0.45, market_prob=0.45)
         assert result == 0.0
