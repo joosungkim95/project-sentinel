@@ -81,8 +81,13 @@ async def detect_and_alert(
         if cycles < MIN_CYCLES_BEFORE_ALERT or expected == 0:
             continue
 
-        # If we've run enough cycles and still have 0 total signals, flag it
-        if total_signals == 0:
+        # Per-job signal tracking (fall back to global check for backward compat)
+        job_signals = job_info.get("signals_generated")
+        if job_signals is None:
+            # Legacy: no per-job tracking, use global
+            job_signals = total_signals
+
+        if job_signals == 0:
             strategies_in_job = job_info.get("strategies", 0)
             asset_class = job_info.get("asset_class", "unknown")
 
