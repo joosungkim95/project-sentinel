@@ -4,9 +4,13 @@ Market Regime Tracker — Classifies and persists market regime changes.
 Tracks whether each asset class is trending up/down, ranging, or in
 high volatility. Regime classification drives strategy selection and
 risk parameter adjustment.
+
+Also provides classify_from_bars() for stateless, indicator-based
+regime detection from OHLCV price data (no trade history needed).
 """
 
 import logging
+import math
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
@@ -183,3 +187,100 @@ class MarketRegimeTracker:
         )
         result = await self.db.execute(stmt)
         return result.scalar_one_or_none()
+
+
+# ---------------------------------------------------------------------------
+# Stateless indicator-based regime classification
+# ---------------------------------------------------------------------------
+
+# Minimum bars needed for classification (SMA-20 + ATR-14 overlap)
+_MIN_BARS = 30
+
+# SMA slope thresholds (annualized % change per bar)
+_TREND_SLOPE_THRESHOLD = 0.15  # 0.15% per bar ≈ noticeable trend
+_STRONG_TREND_SLOPE = 0.40     # 0.40% per bar ≈ strong trend
+
+# ATR / price ratio thresholds for volatility classification
+_HIGH_VOL_RATIO = 0.035  # ATR > 3.5% of price → high volatility
+_LOW_VOL_RATIO = 0.010   # ATR < 1.0% of price → calm / ranging
+
+
+def classify_from_bars(
+    bars: list[dict],
+    sma_period: int = 20,
+    atr_period: int = 14,
+) -> tuple[MarketRegime, float, dict]:
+    """
+    Classify market regime from OHLCV bar data using technical indicators.
+
+    Uses SMA slope for trend direction and ATR/price ratio for volatility.
+    No trade history or database access required.
+
+    Args:
+        bars: List of OHLCV dicts with keys: open, high, low, close.
+              Must be in chronological order (oldest first).
+        sma_period: Period for SMA trend calculation.
+        atr_period: Period for ATR volatility calculation.
+
+    Returns:
+        Tuple of (regime, confidence, indicators_dict).
+        indicators_dict contains sma_slope_pct, atr_ratio, sma_current
+        for observability.
+    """
+    if len(bars) < _MIN_BARS:
+        return MarketRegime.UNKNOWN, 0.0, {}
+
+    closes = [float(b["close"]) for b in bars]
+    highs = [float(b["high"]) for b in bars]
+    lows = [float(b["low"]) for b in bars]
+
+    # SMA slope: compare current SMA to SMA from half-period ago
+    sma_now = sum(closes[-sma_period:]) / sma_period
+    half = sma_period // 2
+    sma_prev = sum(closes[-(sma_period + half) : -half]) / sma_period
+    if sma_prev > 0:
+        sma_slope_pct = (sma_now - sma_prev) / sma_prev * 100
+    else:
+        sma_slope_pct = 0.0
+
+    # ATR: average true range over last atr_period bars
+    true_ranges = []
+    for i in range(-atr_period, 0):
+        tr = max(
+            highs[i] - lows[i],
+            abs(highs[i] - closes[i - 1]),
+            abs(lows[i] - closes[i - 1]),
+        )
+        true_ranges.append(tr)
+    atr = sum(true_ranges) / len(true_ranges)
+    current_price = closes[-1]
+    atr_ratio = atr / current_price if current_price > 0 else 0.0
+
+    indicators = {
+        "sma_slope_pct": round(sma_slope_pct, 4),
+        "atr_ratio": round(atr_ratio, 5),
+        "sma_current": round(sma_now, 2),
+        "atr": round(atr, 4),
+        "price": round(current_price, 2),
+    }
+
+    # High volatility takes priority
+    if atr_ratio > _HIGH_VOL_RATIO:
+        confidence = min(atr_ratio / (_HIGH_VOL_RATIO * 2), 0.95)
+        return MarketRegime.HIGH_VOLATILITY, confidence, indicators
+
+    # Trend detection from SMA slope
+    abs_slope = abs(sma_slope_pct)
+    if abs_slope >= _TREND_SLOPE_THRESHOLD:
+        # Scale confidence: threshold → 0.5, strong → 0.9
+        slope_ratio = min(abs_slope / _STRONG_TREND_SLOPE, 1.0)
+        confidence = 0.5 + slope_ratio * 0.4
+
+        if sma_slope_pct > 0:
+            return MarketRegime.TRENDING_UP, confidence, indicators
+        else:
+            return MarketRegime.TRENDING_DOWN, confidence, indicators
+
+    # Low slope + low vol → ranging
+    confidence = 0.5 + (1.0 - abs_slope / _TREND_SLOPE_THRESHOLD) * 0.3
+    return MarketRegime.RANGING, confidence, indicators

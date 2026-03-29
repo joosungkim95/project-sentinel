@@ -27,7 +27,7 @@ from data.models import (
 )
 from engines.alerts import alert_daily_summary, send_alert, AlertLevel
 from engines.models import AssetClass, MarketRegime
-from memory.market_regime import MarketRegimeTracker
+from memory.market_regime import MarketRegimeTracker, classify_from_bars
 
 logger = logging.getLogger(__name__)
 
@@ -245,15 +245,23 @@ class FastLoop:
         """
         Classify current market regime for an asset class.
 
-        Simple heuristic based on recent trade outcomes:
-        - Mostly winning buys → trending_up
-        - Mostly winning sells → trending_down
-        - Mixed results → ranging
-        - High loss rate → high_volatility
+        First checks if the pipeline already classified and persisted a
+        regime today (via indicator-based classify_from_bars). If so,
+        returns UNKNOWN to skip the update (the DB record is already
+        current). Otherwise falls back to trade-outcome heuristics.
 
         Returns:
             Tuple of (regime, confidence).
         """
+        # If the pipeline already set a regime today, don't overwrite it
+        current = await self.regime_tracker.get_current_regime(asset_class)
+        if current != MarketRegime.UNKNOWN:
+            duration = await self.regime_tracker.get_regime_duration(asset_class)
+            if duration and duration < timedelta(days=1):
+                # Fresh classification from pipeline — keep it
+                return MarketRegime.UNKNOWN, 0.0
+
+        # Fallback: trade-outcome heuristic (needs 3+ recent trades)
         cutoff = datetime.now(timezone.utc) - timedelta(days=3)
         stmt = (
             select(TradeRecord)

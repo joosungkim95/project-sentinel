@@ -32,6 +32,7 @@ from engines.models import AssetClass, MarketRegime
 from engines.pipeline import TradingPipeline
 from engines.risk.engine import RiskEngine
 from engines.strategy.base import Strategy
+from memory.market_regime import MarketRegimeTracker
 
 logger = logging.getLogger(__name__)
 
@@ -253,8 +254,13 @@ class TradingScheduler:
                     db_session=session,
                 )
 
-                # TODO: replace with real regime classification
-                regime = MarketRegime.UNKNOWN
+                # Read persisted regime from DB (set by fast loop or inline)
+                tracker = MarketRegimeTracker(session)
+                regime = await tracker.get_current_regime(asset_class)
+                if regime != MarketRegime.UNKNOWN:
+                    logger.debug(
+                        "[%s] Using persisted regime: %s", job_label, regime.value,
+                    )
 
                 results = await pipeline.run_tier(
                     tier=tier,

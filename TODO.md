@@ -90,7 +90,7 @@
 ## Next Up
 - [ ] Monitor tiered strategies for 1 week (rollback if shadow P&L > -5%)
 - [ ] Promote from shadow mode to larger position sizes once strategies prove profitable
-- [ ] Implement proper market regime classifier (currently hardcoded to UNKNOWN)
+- [x] Implement proper market regime classifier (SMA slope + ATR ratio, persisted to DB, inline + daily)
 
 ## Kalshi Crypto Strategy Roadmap (KCS)
 - [x] KCS-02: Implied probability vs spot divergence (probability model + strategy)

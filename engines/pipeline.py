@@ -28,6 +28,7 @@ from engines.models import (
 )
 from engines.risk.engine import RiskEngine
 from engines.strategy.base import Strategy
+from memory.market_regime import MarketRegimeTracker, classify_from_bars as classify_regime
 from config.tiers import (
     COINBASE_TIMEFRAME_MAP,
     StrategyTier,
@@ -387,6 +388,30 @@ class TradingPipeline:
         bars_by_symbol = await self._fetch_bars_for_tier(
             adapter, list(all_symbols), timeframe, asset_class_str,
         )
+
+        # Inline regime classification from bars when DB has no regime yet
+        if market_regime == MarketRegime.UNKNOWN and bars_by_symbol:
+            for sym, sym_bars in bars_by_symbol.items():
+                if len(sym_bars) >= 30:
+                    regime, conf, indicators = classify_regime(sym_bars)
+                    if regime != MarketRegime.UNKNOWN:
+                        market_regime = regime
+                        logger.info(
+                            "REGIME %s: %s (conf=%.2f, sma_slope=%.3f%%, atr_ratio=%.4f)",
+                            sym, regime.value, conf,
+                            indicators.get("sma_slope_pct", 0),
+                            indicators.get("atr_ratio", 0),
+                        )
+                        # Persist to DB so scheduler reads it next cycle
+                        if self._db_session:
+                            try:
+                                tracker = MarketRegimeTracker(self._db_session)
+                                await tracker.update_regime(
+                                    asset_class, market_regime, conf, indicators,
+                                )
+                            except Exception as e:
+                                logger.warning("Failed to persist regime: %s", e)
+                    break
 
         for strategy in active:
             try:
