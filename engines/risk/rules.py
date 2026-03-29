@@ -11,6 +11,7 @@ Adding a new rule:
 4. Write tests in tests/unit/test_risk_rules.py
 """
 
+import logging
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import Optional
@@ -21,6 +22,8 @@ from engines.models import (
     PortfolioSnapshot,
     Signal,
 )
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -350,6 +353,14 @@ class ConfidenceGateRule(RiskRule):
     ) -> RuleResult:
         threshold = TIER_CONFIDENCE_THRESHOLD[signal.tier]
         if signal.confidence < threshold:
+            logger.info(
+                "ConfidenceGate REJECTED: %s %s conf=%.2f < %.2f (%s tier)",
+                signal.strategy_id,
+                signal.symbol,
+                signal.confidence,
+                threshold,
+                signal.tier.value,
+            )
             return RuleResult(
                 rejected=True,
                 reason=(
