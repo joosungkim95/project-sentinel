@@ -272,6 +272,30 @@ class TradingPipeline:
                 len(markets),
                 strategy.strategy_id,
             )
+
+            # Fetch crypto bars for probability-model strategies (KCS-02)
+            if hasattr(strategy, 'strategy_id') and 'prob' in strategy.strategy_id:
+                coinbase = self.executor._adapters.get(AssetClass.CRYPTO)
+                if coinbase:
+                    try:
+                        fetch_bars = getattr(coinbase, "get_historical_bars", None)
+                        if fetch_bars:
+                            crypto_bars = await fetch_bars(
+                                "BTC-USD",
+                                granularity="ONE_HOUR",
+                                limit=750,  # ~31 days of hourly data
+                            )
+                            logger.debug(
+                                "Fetched %d crypto bars for prob model (%s)",
+                                len(crypto_bars),
+                                strategy.strategy_id,
+                            )
+                            return {"markets": markets, "crypto_bars": crypto_bars}
+                    except Exception as e:
+                        logger.warning(
+                            "Failed to fetch crypto bars for prob model: %s", e
+                        )
+
             return {"markets": markets}
         except Exception as e:
             logger.warning(

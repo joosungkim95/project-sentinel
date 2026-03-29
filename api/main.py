@@ -52,12 +52,13 @@ from engines.strategy.predictions.value_pricing import ValuePricingStrategy
 from engines.strategy.equities.sma_crossover import SMACrossoverStrategy
 from engines.strategy.crypto.volatility_harvest import VolatilityHarvestStrategy
 from engines.strategy.predictions.news_driven import NewsDrivenStrategy
+from engines.strategy.predictions.crypto_probability import CryptoProbabilityStrategy
 
 logger = logging.getLogger(__name__)
 
 
 def _build_strategies() -> list:
-    """Instantiate all 13 tiered strategies."""
+    """Instantiate all 14 tiered strategies."""
     strategies = [
         # Scouts (fast, loose, small bets)
         MomentumStrategy(),              # 7 equities, 15min, OR-based
@@ -72,6 +73,7 @@ def _build_strategies() -> list:
         PullbackStrategy(),              # 7 equities, 4h, trend pullback
         TrendFollowingStrategy(),        # 3 crypto, 4h, OR-relaxed
         ValuePricingStrategy(),          # Kalshi scan, realtime
+        CryptoProbabilityStrategy(),     # Kalshi crypto prob divergence, realtime
 
         # Snipers (rare, high-conviction)
         SMACrossoverStrategy(),          # 3 equities, daily
