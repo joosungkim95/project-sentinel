@@ -89,7 +89,7 @@ def _build_strategies() -> list:
     return strategies
 
 
-def _build_executor() -> Executor:
+async def _build_executor() -> Executor:
     """Build the executor with all available platform adapters."""
     executor = Executor()
 
@@ -99,12 +99,16 @@ def _build_executor() -> Executor:
         try:
             from engines.execution.alpaca import AlpacaAdapter
 
-            executor.register_adapter(AlpacaAdapter(
+            adapter = AlpacaAdapter(
                 api_key=os.environ["ALPACA_API_KEY"],
                 secret_key=os.environ["ALPACA_SECRET_KEY"],
                 base_url=os.getenv("ALPACA_BASE_URL", "https://paper-api.alpaca.markets"),
-            ))
-            logger.info("Registered Alpaca adapter")
+            )
+            if await adapter.connect():
+                executor.register_adapter(adapter)
+                logger.info("Alpaca adapter connected and registered")
+            else:
+                logger.warning("Alpaca adapter failed to connect — not registered")
         except Exception as e:
             logger.warning("Failed to register Alpaca adapter: %s", e)
 
@@ -112,11 +116,15 @@ def _build_executor() -> Executor:
         try:
             from engines.execution.coinbase import CoinbaseAdapter
 
-            executor.register_adapter(CoinbaseAdapter(
+            adapter = CoinbaseAdapter(
                 api_key=os.environ["COINBASE_API_KEY"],
                 api_secret=os.environ["COINBASE_API_SECRET"],
-            ))
-            logger.info("Registered Coinbase adapter")
+            )
+            if await adapter.connect():
+                executor.register_adapter(adapter)
+                logger.info("Coinbase adapter connected and registered")
+            else:
+                logger.warning("Coinbase adapter failed to connect — not registered")
         except Exception as e:
             logger.warning("Failed to register Coinbase adapter: %s", e)
 
@@ -124,12 +132,16 @@ def _build_executor() -> Executor:
         try:
             from engines.execution.kalshi import KalshiAdapter
 
-            executor.register_adapter(KalshiAdapter(
+            adapter = KalshiAdapter(
                 api_key=os.environ["KALSHI_API_KEY"],
                 private_key_pem=os.environ["KALSHI_PRIVATE_KEY"],
                 base_url=os.getenv("KALSHI_BASE_URL", "https://demo-api.kalshi.co"),
-            ))
-            logger.info("Registered Kalshi adapter")
+            )
+            if await adapter.connect():
+                executor.register_adapter(adapter)
+                logger.info("Kalshi adapter connected and registered")
+            else:
+                logger.warning("Kalshi adapter failed to connect — not registered")
         except Exception as e:
             logger.warning("Failed to register Kalshi adapter: %s", e)
 
@@ -154,7 +166,7 @@ async def lifespan(app: FastAPI):
 
     # Build engines
     risk_engine = RiskEngine(RiskConfig())
-    real_executor = _build_executor()
+    real_executor = await _build_executor()
     strategies = _build_strategies()
 
     # Shadow mode: wrap executor if SHADOW_MODE=true
