@@ -93,6 +93,48 @@ async def send_alert(
         return False
 
 
+async def _send_alert_with_color(
+    title: str,
+    message: str,
+    color: int,
+    fields: dict[str, str] | None = None,
+) -> bool:
+    """Send a Discord alert with an explicit embed color."""
+    webhook_url = os.getenv("DISCORD_WEBHOOK_URL")
+    if not webhook_url:
+        logger.warning("DISCORD_WEBHOOK_URL not set — alert suppressed: %s", title)
+        return False
+
+    embed = {
+        "title": title,
+        "description": message,
+        "color": color,
+        "timestamp": datetime.utcnow().isoformat(),
+        "footer": {"text": "Sentinel Trading Platform"},
+    }
+
+    if fields:
+        embed["fields"] = [
+            {"name": k, "value": str(v), "inline": True}
+            for k, v in fields.items()
+        ]
+
+    payload = {"embeds": [embed]}
+
+    try:
+        async with httpx.AsyncClient() as client:
+            response = await client.post(
+                webhook_url,
+                json=payload,
+                timeout=10.0,
+            )
+            response.raise_for_status()
+            return True
+    except httpx.HTTPError as e:
+        logger.error("Failed to send Discord alert: %s", e)
+        return False
+
+
 # --- Convenience functions ---
 
 async def alert_trade_executed(
@@ -102,22 +144,42 @@ async def alert_trade_executed(
     price: float,
     strategy: str,
     pnl: float | None = None,
+    platform: str = "",
 ) -> bool:
-    """Alert when a trade is executed."""
+    """Alert when a trade is executed.
+
+    Args:
+        symbol: Trading pair (e.g. BTC-USD).
+        side: BUY or SELL.
+        quantity: Fill quantity.
+        price: Fill price.
+        strategy: Strategy ID that generated the signal.
+        pnl: Realized P&L if closing a position.
+        platform: Execution platform — starts with "paper_" for shadow sims.
+    """
+    is_paper = platform.startswith("paper_")
+    mode_label = "PAPER" if is_paper else "LIVE"
+    mode_emoji = "\U0001f4dd" if is_paper else "\u2705"  # 📝 vs ✅
+    mode_color = 0x3498DB if is_paper else COLORS[AlertLevel.INFO]  # Blue vs Green
+
     fields = {
         "Symbol": symbol,
         "Side": side.upper(),
         "Quantity": f"{quantity:.4f}",
         "Price": f"${price:,.2f}",
         "Strategy": strategy,
+        "Mode": mode_label,
     }
     if pnl is not None:
         fields["P&L"] = f"${pnl:,.2f}"
 
-    return await send_alert(
-        title=f"Trade Executed: {side.upper()} {symbol}",
-        message=f"{strategy} executed {side} {quantity:.4f} {symbol} @ ${price:,.2f}",
-        level=AlertLevel.INFO,
+    title = f"{mode_emoji} {mode_label} Trade: {side.upper()} {symbol}"
+    message = f"{strategy} executed {side} {quantity:.4f} {symbol} @ ${price:,.2f}"
+
+    return await _send_alert_with_color(
+        title=title,
+        message=message,
+        color=mode_color,
         fields=fields,
     )
 

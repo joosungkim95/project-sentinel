@@ -177,6 +177,7 @@ class TradingPipeline:
                             quantity=trade_result.fill_quantity or 0,
                             price=trade_result.fill_price or 0,
                             strategy=signal.strategy_id,
+                            platform=trade_result.platform,
                         )
                     else:
                         logger.warning(
