@@ -575,13 +575,11 @@ class TradingPipeline:
                 trade_result.fill_price,
                 signal.strategy_id,
             )
-            await alert_trade_executed(
-                symbol=signal.symbol,
-                side=signal.side.value,
-                quantity=trade_result.fill_quantity or 0,
-                price=trade_result.fill_price or 0,
-                strategy=signal.strategy_id,
-            )
+            # NOTE: Discord alert is sent by run_cycle() which calls this method.
+            # Do NOT alert here to avoid duplicate notifications.
+            # TODO: If we switch from shadow mode to live-only trading,
+            # revisit whether alerting should move here instead of run_cycle()
+            # (e.g., if _evaluate_and_execute is called from non-alerting paths).
         else:
             logger.warning(
                 "Trade FAILED: %s %s — %s",
