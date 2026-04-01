@@ -1,5 +1,9 @@
 # CLAUDE.md — Sentinel Trading Platform
 
+> **Important:** Read `docs/context.md` for current operational state (deploy status, platform
+> connections, strategy portfolio, review checklists). Read `docs/chronicle.md` for the narrative
+> project history. Both files must be updated at the end of every session, then `git push origin main`.
+
 ## What Is Sentinel?
 
 Sentinel is a personal autonomous trading platform that operates across three asset classes:
