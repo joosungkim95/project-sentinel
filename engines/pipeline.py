@@ -6,11 +6,13 @@ It's intentionally simple — complexity belongs in the engines, not the glue.
 """
 
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from data.models import PortfolioSnapshotRecord, TradeRecord
 from data.repositories.trades import insert_rejected_signal, insert_trade
 from engines.alerts import (
     alert_circuit_breaker,
@@ -22,6 +24,7 @@ from engines.execution.base import Executor
 from engines.models import (
     AssetClass,
     MarketRegime,
+    PortfolioSnapshot,
     RiskDecision,
     Signal,
     TradeResult,
@@ -98,6 +101,78 @@ class TradingPipeline:
         # Tracks last executed time per (strategy_id, symbol, side)
         self._last_executed: dict[tuple[str, str, str], datetime] = {}
 
+    async def _get_enriched_snapshot(self) -> PortfolioSnapshot:
+        """Get portfolio snapshot with real P&L and drawdown values.
+
+        Enriches the executor's real-time snapshot with:
+        - daily_pnl: realized P&L from trades closed today
+        - weekly_pnl: realized P&L from trades closed in last 7 days
+        - total_pnl: realized P&L from all closed trades
+        - drawdown_from_peak: % decline from highest recorded portfolio value
+        """
+        snapshot = await self.executor.get_portfolio_snapshot()
+
+        if not self._db_session:
+            return snapshot
+
+        now = datetime.now(timezone.utc)
+        day_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        week_start = day_start - timedelta(days=7)
+
+        # Query realized P&L from closed trades
+        daily_stmt = select(
+            func.coalesce(func.sum(TradeRecord.pnl), 0.0)
+        ).where(
+            TradeRecord.exit_time >= day_start,
+            TradeRecord.pnl.isnot(None),
+        )
+        weekly_stmt = select(
+            func.coalesce(func.sum(TradeRecord.pnl), 0.0)
+        ).where(
+            TradeRecord.exit_time >= week_start,
+            TradeRecord.pnl.isnot(None),
+        )
+        total_stmt = select(
+            func.coalesce(func.sum(TradeRecord.pnl), 0.0)
+        ).where(
+            TradeRecord.pnl.isnot(None),
+        )
+
+        # Peak portfolio value from historical snapshots
+        peak_stmt = select(
+            func.coalesce(func.max(PortfolioSnapshotRecord.total_value), 0.0)
+        )
+
+        # Run sequentially — async sessions aren't safe for concurrent use
+        daily_pnl = float(
+            (await self._db_session.execute(daily_stmt)).scalar_one()
+        )
+        weekly_pnl = float(
+            (await self._db_session.execute(weekly_stmt)).scalar_one()
+        )
+        total_pnl = float(
+            (await self._db_session.execute(total_stmt)).scalar_one()
+        )
+        peak_value = float(
+            (await self._db_session.execute(peak_stmt)).scalar_one()
+        )
+
+        # Peak should include current value (in case this is a new high)
+        peak_value = max(peak_value, snapshot.total_value)
+
+        drawdown_from_peak = (
+            ((peak_value - snapshot.total_value) / peak_value * 100.0)
+            if peak_value > 0
+            else 0.0
+        )
+
+        return snapshot.model_copy(update={
+            "daily_pnl": daily_pnl,
+            "weekly_pnl": weekly_pnl,
+            "total_pnl": total_pnl,
+            "drawdown_from_peak": round(drawdown_from_peak, 2),
+        })
+
     @staticmethod
     def _scale_signal_to_portfolio(signal: Signal, portfolio_value: float) -> Signal:
         """Cap a signal's size to a tier-appropriate % of portfolio value.
@@ -143,7 +218,7 @@ class TradingPipeline:
             List of trade results (executed and rejected).
         """
         results: list[TradeResult] = []
-        portfolio = await self.executor.get_portfolio_snapshot()
+        portfolio = await self._get_enriched_snapshot()
 
         for strategy in self.strategies:
             if strategy.status.value not in ("active", "paper_testing"):
@@ -234,7 +309,7 @@ class TradingPipeline:
                     await self._log_outcome(signal, risk_result, trade_result)
 
                     # Refresh portfolio after each trade
-                    portfolio = await self.executor.get_portfolio_snapshot()
+                    portfolio = await self._get_enriched_snapshot()
 
                     # Check if circuit breaker should activate
                     if self._should_activate_circuit_breaker(portfolio):
@@ -620,7 +695,7 @@ class TradingPipeline:
             )
             return None
 
-        portfolio = await self.executor.get_portfolio_snapshot()
+        portfolio = await self._get_enriched_snapshot()
 
         # Scale position size to portfolio
         signal = self._scale_signal_to_portfolio(signal, portfolio.total_value)
@@ -676,7 +751,7 @@ class TradingPipeline:
         await self._log_outcome(signal, risk_result, trade_result)
 
         # Check circuit breaker
-        portfolio = await self.executor.get_portfolio_snapshot()
+        portfolio = await self._get_enriched_snapshot()
         if self._should_activate_circuit_breaker(portfolio):
             self.risk_engine.activate_circuit_breaker()
             await alert_circuit_breaker(

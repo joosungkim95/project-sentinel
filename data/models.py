@@ -157,6 +157,10 @@ class PortfolioSnapshotRecord(Base):
     cash = Column(Float, nullable=False)
     positions = Column(_JsonType, nullable=True)
     risk_utilization = Column(_JsonType, nullable=True)
+    daily_pnl = Column(Float, nullable=False, default=0.0)
+    weekly_pnl = Column(Float, nullable=False, default=0.0)
+    total_pnl = Column(Float, nullable=False, default=0.0)
+    drawdown_from_peak = Column(Float, nullable=False, default=0.0)
     created_at = Column(
         DateTime(timezone=True),
         default=lambda: datetime.now(timezone.utc),
