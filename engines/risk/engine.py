@@ -171,6 +171,14 @@ class RiskEngine:
             portfolio_value=portfolio.total_value,
         )
 
+    def record_trade(self, signal: Signal) -> None:
+        """Update stateful risk rules after a trade is executed."""
+        self._tier_budget_rule.on_trade_executed(signal)
+
+    def record_position_closed(self, signal: Signal) -> None:
+        """Update stateful risk rules when a position is closed."""
+        self._tier_budget_rule.on_position_closed(signal)
+
     def activate_circuit_breaker(self, duration_hours: int = 24) -> None:
         """Activate the circuit breaker to halt all trading."""
         self._circuit_breaker_active = True

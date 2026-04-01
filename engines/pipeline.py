@@ -32,6 +32,7 @@ from memory.market_regime import MarketRegimeTracker, classify_from_bars as clas
 from config.tiers import (
     COINBASE_TIMEFRAME_MAP,
     StrategyTier,
+    TIER_MAX_POSITION_PCT,
     TIER_TIMEFRAMES,
     TIMEFRAME_AGGREGATION,
 )
@@ -97,6 +98,43 @@ class TradingPipeline:
         # Tracks last executed time per (strategy_id, symbol, side)
         self._last_executed: dict[tuple[str, str, str], datetime] = {}
 
+    @staticmethod
+    def _scale_signal_to_portfolio(signal: Signal, portfolio_value: float) -> Signal:
+        """Cap a signal's size to a tier-appropriate % of portfolio value.
+
+        If the strategy's fixed position_size_usd exceeds the tier's max %
+        of the current portfolio, scale quantity and position_size_usd down.
+        Returns a new Signal (original is not mutated).
+        """
+        if portfolio_value <= 0:
+            return signal
+
+        max_pct = TIER_MAX_POSITION_PCT.get(signal.tier, 5.0)
+        max_usd = portfolio_value * (max_pct / 100.0)
+
+        if signal.position_size_usd <= max_usd:
+            return signal  # Already within budget
+
+        # Scale down proportionally
+        scale = max_usd / signal.position_size_usd
+        scaled_qty = signal.quantity * scale
+        price = signal.target_price or 0.0
+
+        logger.info(
+            "Signal SCALED: %s %s $%.0f → $%.0f (%.1f%% of $%.0f portfolio)",
+            signal.strategy_id,
+            signal.symbol,
+            signal.position_size_usd,
+            max_usd,
+            max_pct,
+            portfolio_value,
+        )
+
+        return signal.model_copy(update={
+            "quantity": round(scaled_qty, 8),
+            "position_size_usd": round(max_usd, 2),
+        })
+
     async def run_cycle(self, market_regime: MarketRegime) -> list[TradeResult]:
         """
         Run one full trading cycle across all active strategies.
@@ -135,6 +173,11 @@ class TradingPipeline:
                         )
                         continue
 
+                    # 2c. Scale position size to portfolio
+                    signal = self._scale_signal_to_portfolio(
+                        signal, portfolio.total_value,
+                    )
+
                     # 3. Risk check
                     risk_result = self.risk_engine.evaluate(signal, portfolio)
 
@@ -164,6 +207,7 @@ class TradingPipeline:
 
                     if trade_result.executed:
                         self._last_executed[cooldown_key] = datetime.utcnow()
+                        self.risk_engine.record_trade(signal)
                         logger.info(
                             "Trade EXECUTED: %s %s @ %s (strategy: %s)",
                             signal.side.value,
@@ -577,6 +621,10 @@ class TradingPipeline:
             return None
 
         portfolio = await self.executor.get_portfolio_snapshot()
+
+        # Scale position size to portfolio
+        signal = self._scale_signal_to_portfolio(signal, portfolio.total_value)
+
         risk_result = self.risk_engine.evaluate(signal, portfolio)
 
         if risk_result.decision == RiskDecision.REJECTED:
@@ -604,6 +652,7 @@ class TradingPipeline:
 
         if trade_result.executed:
             self._last_executed[cooldown_key] = datetime.utcnow()
+            self.risk_engine.record_trade(signal)
             logger.info(
                 "Trade EXECUTED: %s %s @ %s (strategy: %s)",
                 signal.side.value,

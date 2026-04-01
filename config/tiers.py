@@ -21,6 +21,16 @@ TIER_CONFIDENCE_THRESHOLD: dict[StrategyTier, float] = {
     StrategyTier.SNIPER: 0.7,
 }
 
+# Max position size as a percentage of total portfolio value, per tier.
+# Strategies define a fixed position_size_usd as an upper bound, but the
+# pipeline will cap the actual trade to this % of portfolio so that small
+# accounts are not overexposed.
+TIER_MAX_POSITION_PCT: dict[StrategyTier, float] = {
+    StrategyTier.SCOUT: 3.0,   # Small, exploratory bets
+    StrategyTier.CORE: 5.0,    # Balanced, confirmed setups
+    StrategyTier.SNIPER: 8.0,  # High-conviction, but still bounded
+}
+
 # Canonical timeframe strings use Alpaca convention
 TIER_TIMEFRAMES: dict[StrategyTier, dict[str, str]] = {
     StrategyTier.SCOUT: {
