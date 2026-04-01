@@ -6,7 +6,7 @@ It's intentionally simple — complexity belongs in the engines, not the glue.
 """
 
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -77,18 +77,25 @@ class TradingPipeline:
     4. All outcomes are logged for the Learning Engine
     """
 
+    # Skip duplicate signals from the same strategy/symbol/side within this window.
+    DEFAULT_SIGNAL_COOLDOWN = timedelta(hours=4)
+
     def __init__(
         self,
         risk_engine: RiskEngine,
         executor: Executor,
         strategies: list[Strategy],
         db_session: AsyncSession | None = None,
+        signal_cooldown: timedelta | None = None,
     ):
         self.risk_engine = risk_engine
         self.executor = executor
         self.strategies = strategies
         self._db_session = db_session
         self._trade_log: list[dict[str, Any]] = []
+        self._signal_cooldown = signal_cooldown or self.DEFAULT_SIGNAL_COOLDOWN
+        # Tracks last executed time per (strategy_id, symbol, side)
+        self._last_executed: dict[tuple[str, str, str], datetime] = {}
 
     async def run_cycle(self, market_regime: MarketRegime) -> list[TradeResult]:
         """
@@ -115,6 +122,19 @@ class TradingPipeline:
                 )
 
                 for signal in signals:
+                    # 2b. Cooldown check — skip if same signal was recently executed
+                    cooldown_key = (signal.strategy_id, signal.symbol, signal.side.value)
+                    last_exec = self._last_executed.get(cooldown_key)
+                    if last_exec and (datetime.utcnow() - last_exec) < self._signal_cooldown:
+                        logger.info(
+                            "Signal COOLDOWN: %s %s %s — last executed %s ago",
+                            signal.side.value,
+                            signal.symbol,
+                            signal.strategy_id,
+                            datetime.utcnow() - last_exec,
+                        )
+                        continue
+
                     # 3. Risk check
                     risk_result = self.risk_engine.evaluate(signal, portfolio)
 
@@ -143,6 +163,7 @@ class TradingPipeline:
                     results.append(trade_result)
 
                     if trade_result.executed:
+                        self._last_executed[cooldown_key] = datetime.utcnow()
                         logger.info(
                             "Trade EXECUTED: %s %s @ %s (strategy: %s)",
                             signal.side.value,
@@ -541,6 +562,19 @@ class TradingPipeline:
         Returns:
             TradeResult if a trade was attempted, None if rejected.
         """
+        # Cooldown check
+        cooldown_key = (signal.strategy_id, signal.symbol, signal.side.value)
+        last_exec = self._last_executed.get(cooldown_key)
+        if last_exec and (datetime.utcnow() - last_exec) < self._signal_cooldown:
+            logger.info(
+                "Signal COOLDOWN: %s %s %s — last executed %s ago",
+                signal.side.value,
+                signal.symbol,
+                signal.strategy_id,
+                datetime.utcnow() - last_exec,
+            )
+            return None
+
         portfolio = await self.executor.get_portfolio_snapshot()
         risk_result = self.risk_engine.evaluate(signal, portfolio)
 
@@ -568,6 +602,7 @@ class TradingPipeline:
         trade_result = await self.executor.execute(risk_result)
 
         if trade_result.executed:
+            self._last_executed[cooldown_key] = datetime.utcnow()
             logger.info(
                 "Trade EXECUTED: %s %s @ %s (strategy: %s)",
                 signal.side.value,
