@@ -70,6 +70,23 @@ A running narrative of building a personal autonomous trading platform with Clau
 
 ---
 
+## Phase 5: Coinbase Fix & Dashboard Overhaul (April 1, 2026)
+
+**The Coinbase divergence bug:** Shadow mode was reporting 100% divergence on crypto — 19/19 paper trades filled but only 1/19 live trades succeeded. System correctly auto-paused live trading. Root cause: shadow mode's crypto minimum was 0.0001 BTC (~$8.74 at $87k BTC), but Coinbase requires $10 minimum for market buy orders. Paper simulation blindly returned `executed=True` with no platform validation, so it never caught the mismatch.
+
+**The fix:** Bumped crypto minimum to 0.00012 BTC (~$10.20) and added a pre-flight USD check in the Coinbase adapter that raises a clear error before sending undersized orders.
+
+**The dashboard problem:** Trades panel was a flat laundry list with no way to distinguish paper from live trades. The `TradeResult.platform` field ("coinbase", "paper_crypto", etc.) was available in the execution engine but got dropped during database persistence.
+
+**The fix:** Full-stack change across all three layers:
+- Data: Added `platform` column to `TradeRecord` + Alembic migration, wired through `insert_trade`
+- API: Added server-side filtering (`/trades?platform=paper&asset_class=crypto`) 
+- Dashboard: Redesigned trades panel with All/Live/Paper tab bar, platform badges (blue for live, gray for paper), asset class dropdown filter, day-grouped layout with daily P&L summaries, and a shadow status bar showing health/divergence metrics from the `/shadow` endpoint
+
+**Also evaluated:** "Smart money" wallet-following strategy for crypto. Decided against — survivorship bias, front-running by existing copy-trade bots, execution gap on whale-sized trades, and wash trading contamination make it an unreliable edge. Better to sharpen our own 15 strategies.
+
+---
+
 ## Running Themes
 
 - **Cost obsession:** Everything is designed to stay under $30/mo. Haiku for routine calls, Sonnet only for strategy generation, prompt caching, no Kubernetes.

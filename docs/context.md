@@ -43,7 +43,10 @@ Jay is building Sentinel as a personal project. Experienced developer comfortabl
 - All 3 platform adapters connected (Alpaca, Coinbase, Kalshi)
 - P&L/drawdown enrichment live — HardFloor, DailyLoss, WeeklyDrawdown safety rules now read real values
 - Repo is public (no secrets committed)
-- Alembic migration a1b2c3d4e5f6 pending auto-deploy (adds pnl/drawdown columns to portfolio_snapshots)
+- Alembic migrations up to b2c3d4e5f6a7 (adds platform column to trades table — auto-runs on deploy)
+- Dashboard redesigned: trades panel now has All/Live/Paper tabs, platform badges, asset class filter, day-grouped layout, shadow status bar
+- Coinbase min order fix deployed: shadow crypto minimum bumped from 0.0001 to 0.00012 BTC (~$10.20) to clear Coinbase's $10 market order floor
+- Coinbase adapter now validates USD amount before submitting market buy orders
 
 **Env vars on Railway:** ALPACA_API_KEY, ALPACA_SECRET_KEY, COINBASE_API_KEY, COINBASE_API_SECRET, KALSHI_API_KEY, KALSHI_BASE_URL, KALSHI_PRIVATE_KEY, DATABASE_URL, REDIS_URL, DISCORD_WEBHOOK_URL, SHADOW_MODE, ANTHROPIC_API_KEY
 
@@ -56,11 +59,11 @@ Jay is building Sentinel as a personal project. Experienced developer comfortabl
 | Platform | Status | Mode | Notes |
 |----------|--------|------|-------|
 | Alpaca | Connected on Railway | Paper trading | `ALPACA_BASE_URL=https://paper-api.alpaca.markets` |
-| Coinbase | Connected on Railway | Real money (shadow min-size ~$4) | COINBASE_API_SECRET PEM added via Railway Variables |
+| Coinbase | Connected on Railway | Real money (shadow min-size ~$10) | COINBASE_API_SECRET PEM added via Railway Variables |
 | Kalshi | Connected on Railway | Demo | `KALSHI_BASE_URL=https://demo-api.kalshi.co` |
 | Polymarket | Blocked | N/A | US trading restricted |
 
-**Shadow mode:** All trades execute at minimum size (1 share / 0.0001 BTC / 1 contract) on real platforms, full-size paper simulations tracked in parallel.
+**Shadow mode:** All trades execute at minimum size (1 share / 0.00012 BTC / 1 contract) on real platforms, full-size paper simulations tracked in parallel.
 
 **To switch to live:** Alpaca → change ALPACA_BASE_URL to `https://api.alpaca.markets`. Kalshi → change KALSHI_BASE_URL to `https://trading-api.kalshi.co`. Only after 2+ weeks clean shadow mode.
 
