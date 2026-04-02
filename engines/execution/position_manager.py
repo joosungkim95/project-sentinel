@@ -20,7 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from data.models import TradeRecord
 from data.repositories.trades import close_trade, get_open_trades
-from engines.alerts import alert_trade_executed
+from engines.alerts import send_alert, AlertLevel
 from engines.models import AssetClass, Signal, Side
 
 logger = logging.getLogger(__name__)
@@ -55,6 +55,8 @@ class PositionManager:
         """
         Check all open positions for exit conditions.
 
+        Sends a single batched Discord alert if any positions are closed.
+
         Args:
             asset_class: Only check positions in this asset class.
 
@@ -73,6 +75,10 @@ class PositionManager:
             result = await self._check_single_exit(trade)
             if result:
                 closed.append(result)
+
+        # Send a single batched alert instead of one per close
+        if closed:
+            await self._alert_batch_closed(closed)
 
         return closed
 
@@ -99,9 +105,14 @@ class PositionManager:
         if current_price is None:
             current_price = signal.target_price or trade.price
 
-        return await self._close_position(
+        result = await self._close_position(
             trade, current_price, f"strategy_sell: {signal.rationale[:80]}",
         )
+
+        # Single alert for strategy-driven close
+        await self._alert_batch_closed([result])
+
+        return result
 
     async def _check_single_exit(
         self, trade: TradeRecord,
@@ -147,7 +158,7 @@ class PositionManager:
         exit_price: float,
         reason: str,
     ) -> dict[str, Any]:
-        """Close a position: update DB record and log."""
+        """Close a position: update DB record and log. No per-trade alert."""
         pnl = (exit_price - trade.price) * trade.quantity
         pnl_pct = (exit_price - trade.price) / trade.price * 100 if trade.price > 0 else 0
 
@@ -155,7 +166,7 @@ class PositionManager:
         await self._session.commit()
 
         logger.info(
-            "Position CLOSED: %s %s @ %.2f → %.2f (pnl=%.4f / %.2f%%) [%s]",
+            "Position CLOSED: %s %s @ %.2f -> %.2f (pnl=%.4f / %.2f%%) [%s]",
             trade.strategy_id,
             trade.symbol,
             trade.price,
@@ -163,16 +174,6 @@ class PositionManager:
             pnl,
             pnl_pct,
             reason,
-        )
-
-        # Send Discord alert
-        await alert_trade_executed(
-            symbol=trade.symbol,
-            side="sell",
-            quantity=trade.quantity,
-            price=exit_price,
-            strategy=trade.strategy_id,
-            platform=trade.platform or "unknown",
         )
 
         return {
@@ -185,6 +186,40 @@ class PositionManager:
             "pnl_pct": round(pnl_pct, 2),
             "reason": reason,
         }
+
+    async def _alert_batch_closed(
+        self, closed: list[dict[str, Any]],
+    ) -> None:
+        """Send a single Discord alert summarizing all closed positions."""
+        total_pnl = sum(c["pnl"] for c in closed)
+        winners = sum(1 for c in closed if c["pnl"] > 0)
+        losers = len(closed) - winners
+
+        # Build a compact summary of each close
+        lines = []
+        for c in closed[:10]:  # Cap at 10 lines to avoid huge messages
+            pnl_sign = "+" if c["pnl"] >= 0 else ""
+            lines.append(
+                f"`{c['symbol']}` {c['strategy_id']}: "
+                f"${c['entry_price']:,.2f} -> ${c['exit_price']:,.2f} "
+                f"({pnl_sign}{c['pnl_pct']:.1f}%) [{c['reason'].split(':')[0]}]"
+            )
+        if len(closed) > 10:
+            lines.append(f"...and {len(closed) - 10} more")
+
+        pnl_emoji = "+" if total_pnl >= 0 else ""
+
+        await send_alert(
+            title=f"Positions Closed: {len(closed)} exits ({pnl_emoji}${total_pnl:,.2f})",
+            message="\n".join(lines),
+            level=AlertLevel.INFO,
+            fields={
+                "Closed": str(len(closed)),
+                "Winners": str(winners),
+                "Losers": str(losers),
+                "Total P&L": f"${total_pnl:,.2f}",
+            },
+        )
 
     async def _get_current_price(
         self, trade: TradeRecord,
