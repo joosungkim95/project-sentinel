@@ -60,6 +60,7 @@ export interface PortfolioData {
 export interface Trade {
   id: number;
   strategy_id: string;
+  asset_class: string;
   symbol: string;
   side: string;
   quantity: number;
@@ -67,7 +68,42 @@ export interface Trade {
   risk_check_result: string;
   pnl: number | null;
   market_regime: string;
+  platform: string | null;
   created_at: string;
+}
+
+export interface TradeFilters {
+  platform?: 'paper' | 'live' | string;
+  asset_class?: string;
+  strategy_id?: string;
+  side?: string;
+}
+
+export interface ShadowDivergence {
+  time: string;
+  symbol: string;
+  type: string;
+  magnitude: number;
+  details: string;
+}
+
+export interface ShadowData {
+  shadow_mode: boolean;
+  mode?: string;
+  live_paused?: boolean;
+  stats?: {
+    total_signals: number;
+    live_executed: number;
+    live_failed: number;
+    paper_fills: number;
+    divergence_count: number;
+    max_price_divergence_pct: number;
+    avg_price_divergence_pct: number;
+    fill_rate_match: number;
+    healthy: boolean;
+  };
+  recent_divergences?: ShadowDivergence[];
+  message?: string;
 }
 
 export interface TradesData {
@@ -156,7 +192,15 @@ export interface LearningData {
 
 export const fetchHealth = () => get<HealthData>('/health');
 export const fetchPortfolio = () => get<PortfolioData>('/portfolio');
-export const fetchTrades = (limit = 20) => get<TradesData>(`/trades?limit=${limit}`);
+export function fetchTrades(limit = 50, filters?: TradeFilters): Promise<TradesData> {
+  const params = new URLSearchParams({ limit: String(limit) });
+  if (filters?.platform) params.set('platform', filters.platform);
+  if (filters?.asset_class) params.set('asset_class', filters.asset_class);
+  if (filters?.strategy_id) params.set('strategy_id', filters.strategy_id);
+  if (filters?.side) params.set('side', filters.side);
+  return get<TradesData>(`/trades?${params}`);
+}
+export const fetchShadow = () => get<ShadowData>('/shadow');
 export const fetchStrategies = () => get<StrategiesData>('/strategies');
 export const fetchRiskEvents = (limit = 10) => get<RiskEventsData>(`/risk-events?limit=${limit}`);
 export const fetchSystemHealth = () => get<SystemHealthData>('/system-health');

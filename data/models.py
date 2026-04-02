@@ -54,6 +54,7 @@ class TradeRecord(Base):
     pnl = Column(Float, nullable=True)
     pnl_pct = Column(Float, nullable=True)
     market_regime = Column(String(30), nullable=False)
+    platform = Column(String(30), nullable=True, index=True)
     context_snapshot_id = Column(Integer, nullable=True)
     created_at = Column(
         DateTime(timezone=True),

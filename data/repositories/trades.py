@@ -2,6 +2,8 @@
 Trade persistence — insert and query trade records.
 """
 
+from typing import Optional
+
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -31,6 +33,7 @@ async def insert_trade(session: AsyncSession, trade: TradeResult) -> int:
         risk_check_result=trade.risk_check.decision.value,
         risk_utilization_pct=trade.risk_check.risk_utilization_pct,
         market_regime=trade.signal.market_regime.value,
+        platform=trade.platform,
     )
     session.add(record)
     await session.flush()
@@ -69,22 +72,43 @@ async def insert_rejected_signal(
 
 
 async def get_recent_trades(
-    session: AsyncSession, limit: int = 50
+    session: AsyncSession,
+    limit: int = 50,
+    platform: Optional[str] = None,
+    asset_class: Optional[str] = None,
+    strategy_id: Optional[str] = None,
+    side: Optional[str] = None,
 ) -> list[TradeRecord]:
     """
-    Get most recent trades, newest first.
+    Get most recent trades, newest first, with optional filters.
 
     Args:
         session: Active async database session.
         limit: Max number of trades to return.
+        platform: Filter by platform (e.g., "coinbase", "paper_crypto").
+        asset_class: Filter by asset class (e.g., "crypto", "equities").
+        strategy_id: Filter by strategy ID.
+        side: Filter by side ("buy" or "sell").
 
     Returns:
         List of TradeRecord objects.
     """
-    stmt = (
-        select(TradeRecord)
-        .order_by(TradeRecord.created_at.desc())
-        .limit(limit)
-    )
+    stmt = select(TradeRecord)
+
+    if platform == "paper":
+        stmt = stmt.where(TradeRecord.platform.like("paper_%"))
+    elif platform == "live":
+        stmt = stmt.where(~TradeRecord.platform.like("paper_%"))
+    elif platform:
+        stmt = stmt.where(TradeRecord.platform == platform)
+
+    if asset_class:
+        stmt = stmt.where(TradeRecord.asset_class == asset_class)
+    if strategy_id:
+        stmt = stmt.where(TradeRecord.strategy_id == strategy_id)
+    if side:
+        stmt = stmt.where(TradeRecord.side == side)
+
+    stmt = stmt.order_by(TradeRecord.created_at.desc()).limit(limit)
     result = await session.execute(stmt)
     return list(result.scalars().all())

@@ -33,6 +33,7 @@ class CoinbaseAdapter:
 
     platform_name = "coinbase"
     asset_class = AssetClass.CRYPTO
+    MIN_MARKET_ORDER_USD = 10.0  # Coinbase minimum for market orders
 
     def __init__(self, api_key: str, api_secret: str):
         """
@@ -101,7 +102,13 @@ class CoinbaseAdapter:
             else:
                 if signal.side == Side.BUY:
                     # Market buy uses quote_size (USD amount)
-                    quote_size = str(round(quantity * self._get_price(product_id), 2))
+                    usd_amount = round(quantity * self._get_price(product_id), 2)
+                    if usd_amount < self.MIN_MARKET_ORDER_USD:
+                        raise ValueError(
+                            f"Market buy ${usd_amount} below Coinbase "
+                            f"minimum ${self.MIN_MARKET_ORDER_USD}"
+                        )
+                    quote_size = str(usd_amount)
                     order = self._client.market_order_buy(
                         client_order_id=client_order_id,
                         product_id=product_id,

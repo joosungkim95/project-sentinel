@@ -338,15 +338,29 @@ async def get_portfolio():
 
 
 @app.get("/trades")
-async def get_trades(limit: int = 50):
-    """Get recent trades."""
+async def get_trades(
+    limit: int = 50,
+    platform: str | None = None,
+    asset_class: str | None = None,
+    strategy_id: str | None = None,
+    side: str | None = None,
+):
+    """Get recent trades with optional filters."""
     async with async_session_factory() as session:
-        trades = await get_recent_trades(session, limit=limit)
+        trades = await get_recent_trades(
+            session,
+            limit=limit,
+            platform=platform,
+            asset_class=asset_class,
+            strategy_id=strategy_id,
+            side=side,
+        )
         return {
             "trades": [
                 {
                     "id": t.id,
                     "strategy_id": t.strategy_id,
+                    "asset_class": t.asset_class,
                     "symbol": t.symbol,
                     "side": t.side,
                     "quantity": t.quantity,
@@ -354,6 +368,7 @@ async def get_trades(limit: int = 50):
                     "risk_check_result": t.risk_check_result,
                     "pnl": t.pnl,
                     "market_regime": t.market_regime,
+                    "platform": t.platform,
                     "created_at": t.created_at.isoformat() if t.created_at else None,
                 }
                 for t in trades

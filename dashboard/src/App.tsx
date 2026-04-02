@@ -7,17 +7,21 @@ import {
   fetchRiskEvents,
   fetchSystemHealth,
   fetchLearning,
+  fetchShadow,
   emergencyStop,
   pauseAsset,
   resumeAsset,
   type HealthData,
   type PortfolioData,
   type TradesData,
+  type Trade,
+  type TradeFilters,
   type StrategiesData,
   type SchedulerJob,
   type RiskEventsData,
   type SystemHealthData,
   type LearningData,
+  type ShadowData,
 } from './api';
 import { usePolling } from './hooks';
 
@@ -179,53 +183,199 @@ function StrategiesPanel({ data }: { data: StrategiesData | null }) {
   );
 }
 
-function TradesPanel({ data }: { data: TradesData | null }) {
-  if (!data) return null;
+function ShadowStatusBar({ data }: { data: ShadowData | null }) {
+  if (!data || !data.shadow_mode || !data.stats) return null;
+  const s = data.stats;
   return (
-    <Card title="Recent Trades">
-      {data.trades.length === 0 ? (
-        <p className="text-zinc-500 text-sm">No trades yet.</p>
-      ) : (
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="text-xs text-zinc-500 border-b border-zinc-800">
-                <th className="text-left py-2 font-medium">Time</th>
-                <th className="text-left py-2 font-medium">Strategy</th>
-                <th className="text-left py-2 font-medium">Symbol</th>
-                <th className="text-left py-2 font-medium">Side</th>
-                <th className="text-right py-2 font-medium">Qty</th>
-                <th className="text-right py-2 font-medium">Price</th>
-                <th className="text-right py-2 font-medium">P&L</th>
-              </tr>
-            </thead>
-            <tbody>
-              {data.trades.map((t) => (
-                <tr key={t.id} className="border-b border-zinc-800/50 hover:bg-zinc-800/30">
-                  <td className="py-2 font-mono text-xs text-zinc-500">
-                    {t.created_at ? new Date(t.created_at).toLocaleTimeString() : '--'}
-                  </td>
-                  <td className="py-2 text-zinc-300">{t.strategy_id}</td>
-                  <td className="py-2 font-mono text-zinc-200">{t.symbol}</td>
-                  <td className="py-2">
-                    <Badge color={t.side === 'buy' ? 'green' : 'red'}>{t.side.toUpperCase()}</Badge>
-                  </td>
-                  <td className="py-2 text-right font-mono text-zinc-300">{t.quantity}</td>
-                  <td className="py-2 text-right font-mono text-zinc-300">
-                    ${t.price?.toLocaleString('en-US', { minimumFractionDigits: 2 }) ?? '--'}
-                  </td>
-                  <td className={`py-2 text-right font-mono ${
-                    t.pnl === null ? 'text-zinc-500' : t.pnl >= 0 ? 'text-emerald-400' : 'text-red-400'
-                  }`}>
-                    {t.pnl !== null ? `$${t.pnl.toFixed(2)}` : '--'}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+    <div className="flex items-center gap-4 bg-zinc-900 border border-zinc-800 rounded-lg px-4 py-3 mb-4">
+      <div className="flex items-center gap-2">
+        <span className="text-xs text-zinc-500 uppercase tracking-wide">Shadow</span>
+        <Badge color={s.healthy ? 'green' : 'red'}>{s.healthy ? 'HEALTHY' : 'UNHEALTHY'}</Badge>
+        {data.live_paused && <Badge color="red">LIVE PAUSED</Badge>}
+      </div>
+      <div className="flex items-center gap-4 ml-auto text-xs font-mono">
+        <span className="text-zinc-500">
+          Live: <span className="text-zinc-300">{s.live_executed}/{s.total_signals}</span>
+        </span>
+        <span className="text-zinc-500">
+          Paper: <span className="text-zinc-300">{s.paper_fills}/{s.total_signals}</span>
+        </span>
+        <span className="text-zinc-500">
+          Divergences: <span className={s.divergence_count > 0 ? 'text-amber-400' : 'text-zinc-300'}>{s.divergence_count}</span>
+        </span>
+        <span className="text-zinc-500">
+          Fill match: <span className={s.fill_rate_match < 0.8 ? 'text-red-400' : 'text-zinc-300'}>{(s.fill_rate_match * 100).toFixed(0)}%</span>
+        </span>
+      </div>
+    </div>
+  );
+}
+
+type TradeTab = 'all' | 'live' | 'paper';
+
+function TabButton({ active, onClick, children }: { active: boolean; onClick: () => void; children: React.ReactNode }) {
+  return (
+    <button
+      onClick={onClick}
+      className={`px-3 py-1.5 text-xs font-medium rounded cursor-pointer transition-colors ${
+        active
+          ? 'bg-zinc-800 text-zinc-100 border border-zinc-700'
+          : 'text-zinc-500 hover:text-zinc-300 border border-transparent'
+      }`}
+    >
+      {children}
+    </button>
+  );
+}
+
+function PlatformBadge({ platform }: { platform: string | null }) {
+  if (!platform) return <Badge color="zinc">unknown</Badge>;
+  const isPaper = platform.startsWith('paper_');
+  if (isPaper) return <Badge color="zinc">PAPER</Badge>;
+  const names: Record<string, string> = { alpaca: 'ALPACA', coinbase: 'COINBASE', kalshi: 'KALSHI' };
+  return <Badge color="blue">{names[platform] ?? platform.toUpperCase()}</Badge>;
+}
+
+function groupTradesByDate(trades: Trade[]): Map<string, Trade[]> {
+  const groups = new Map<string, Trade[]>();
+  for (const t of trades) {
+    const date = t.created_at ? new Date(t.created_at).toLocaleDateString() : 'Unknown';
+    const existing = groups.get(date);
+    if (existing) {
+      existing.push(t);
+    } else {
+      groups.set(date, [t]);
+    }
+  }
+  return groups;
+}
+
+function TradesPanel({ data, shadow, onFilterChange }: {
+  data: TradesData | null;
+  shadow: ShadowData | null;
+  onFilterChange: (filters: TradeFilters) => void;
+}) {
+  const [tab, setTab] = useState<TradeTab>('all');
+  const [assetFilter, setAssetFilter] = useState<string>('');
+
+  const handleTabChange = (newTab: TradeTab) => {
+    setTab(newTab);
+    onFilterChange({
+      platform: newTab === 'all' ? undefined : newTab,
+      asset_class: assetFilter || undefined,
+    });
+  };
+
+  const handleAssetChange = (ac: string) => {
+    setAssetFilter(ac);
+    onFilterChange({
+      platform: tab === 'all' ? undefined : tab,
+      asset_class: ac || undefined,
+    });
+  };
+
+  if (!data) return null;
+
+  const grouped = groupTradesByDate(data.trades);
+
+  return (
+    <div>
+      <ShadowStatusBar data={shadow} />
+      <div className="bg-zinc-900 border border-zinc-800 rounded-lg">
+        {/* Header with tabs and filters */}
+        <div className="px-4 py-3 border-b border-zinc-800 flex items-center justify-between flex-wrap gap-2">
+          <div className="flex items-center gap-1">
+            <TabButton active={tab === 'all'} onClick={() => handleTabChange('all')}>All</TabButton>
+            <TabButton active={tab === 'live'} onClick={() => handleTabChange('live')}>Live</TabButton>
+            <TabButton active={tab === 'paper'} onClick={() => handleTabChange('paper')}>Paper</TabButton>
+          </div>
+          <div className="flex items-center gap-2">
+            <select
+              value={assetFilter}
+              onChange={(e) => handleAssetChange(e.target.value)}
+              className="bg-zinc-950 border border-zinc-800 rounded text-xs text-zinc-400 px-2 py-1.5 cursor-pointer"
+            >
+              <option value="">All assets</option>
+              <option value="equities">Equities</option>
+              <option value="crypto">Crypto</option>
+              <option value="predictions">Predictions</option>
+            </select>
+            <span className="text-xs text-zinc-600 font-mono">{data.count} trades</span>
+          </div>
         </div>
-      )}
-    </Card>
+
+        {/* Trade rows grouped by day */}
+        <div className="p-4">
+          {data.trades.length === 0 ? (
+            <p className="text-zinc-500 text-sm">No trades match filters.</p>
+          ) : (
+            <div className="space-y-4">
+              {Array.from(grouped.entries()).map(([date, trades]) => {
+                const dayPnl = trades.reduce((sum, t) => sum + (t.pnl ?? 0), 0);
+                const closedCount = trades.filter((t) => t.pnl !== null).length;
+                return (
+                  <div key={date}>
+                    {/* Day header */}
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="text-xs text-zinc-500 font-medium">{date}</span>
+                      <div className="flex items-center gap-3 text-xs font-mono">
+                        <span className="text-zinc-600">{trades.length} trades</span>
+                        {closedCount > 0 && (
+                          <span className={dayPnl >= 0 ? 'text-emerald-400' : 'text-red-400'}>
+                            {dayPnl >= 0 ? '+' : ''}{dayPnl.toFixed(2)}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                    {/* Table */}
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-sm">
+                        <thead>
+                          <tr className="text-xs text-zinc-600 border-b border-zinc-800/50">
+                            <th className="text-left py-1.5 font-medium">Time</th>
+                            <th className="text-left py-1.5 font-medium">Platform</th>
+                            <th className="text-left py-1.5 font-medium">Strategy</th>
+                            <th className="text-left py-1.5 font-medium">Symbol</th>
+                            <th className="text-left py-1.5 font-medium">Side</th>
+                            <th className="text-right py-1.5 font-medium">Qty</th>
+                            <th className="text-right py-1.5 font-medium">Price</th>
+                            <th className="text-right py-1.5 font-medium">P&L</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {trades.map((t) => (
+                            <tr key={t.id} className="border-b border-zinc-800/30 hover:bg-zinc-800/20">
+                              <td className="py-2 font-mono text-xs text-zinc-500">
+                                {t.created_at ? new Date(t.created_at).toLocaleTimeString() : '--'}
+                              </td>
+                              <td className="py-2"><PlatformBadge platform={t.platform} /></td>
+                              <td className="py-2 text-zinc-300 text-xs">{t.strategy_id}</td>
+                              <td className="py-2 font-mono text-zinc-200">{t.symbol}</td>
+                              <td className="py-2">
+                                <Badge color={t.side === 'buy' ? 'green' : 'red'}>{t.side.toUpperCase()}</Badge>
+                              </td>
+                              <td className="py-2 text-right font-mono text-zinc-300">{t.quantity}</td>
+                              <td className="py-2 text-right font-mono text-zinc-300">
+                                ${t.price?.toLocaleString('en-US', { minimumFractionDigits: 2 }) ?? '--'}
+                              </td>
+                              <td className={`py-2 text-right font-mono ${
+                                t.pnl === null ? 'text-zinc-600' : t.pnl >= 0 ? 'text-emerald-400' : 'text-red-400'
+                              }`}>
+                                {t.pnl !== null ? `$${t.pnl.toFixed(2)}` : '--'}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -352,14 +502,16 @@ function LearningPanel({ data }: { data: LearningData | null }) {
 
 export default function App() {
   const [stopping, setStopping] = useState(false);
+  const [tradeFilters, setTradeFilters] = useState<TradeFilters>({});
 
   const healthFetcher = useCallback(() => fetchHealth(), []);
   const portfolioFetcher = useCallback(() => fetchPortfolio(), []);
-  const tradesFetcher = useCallback(() => fetchTrades(20), []);
+  const tradesFetcher = useCallback(() => fetchTrades(50, tradeFilters), [tradeFilters]);
   const strategiesFetcher = useCallback(() => fetchStrategies(), []);
   const riskEventsFetcher = useCallback(() => fetchRiskEvents(10), []);
   const systemHealthFetcher = useCallback(() => fetchSystemHealth(), []);
   const learningFetcher = useCallback(() => fetchLearning(), []);
+  const shadowFetcher = useCallback(() => fetchShadow(), []);
 
   const health = usePolling(healthFetcher, 5000);
   const portfolio = usePolling(portfolioFetcher, 10000);
@@ -368,6 +520,7 @@ export default function App() {
   const riskEvents = usePolling(riskEventsFetcher, 15000);
   const systemHealth = usePolling(systemHealthFetcher, 10000);
   const learning = usePolling(learningFetcher, 30000);
+  const shadow = usePolling(shadowFetcher, 10000);
 
   const handleEmergencyStop = async () => {
     if (!confirm('EMERGENCY STOP: This will halt all trading. Continue?')) return;
@@ -435,7 +588,7 @@ export default function App() {
           <StrategiesPanel data={strategies.data} />
         </div>
 
-        <TradesPanel data={trades.data} />
+        <TradesPanel data={trades.data} shadow={shadow.data} onFilterChange={setTradeFilters} />
 
         <RiskEventsPanel data={riskEvents.data} />
 

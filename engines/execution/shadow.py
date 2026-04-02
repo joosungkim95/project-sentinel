@@ -37,9 +37,11 @@ from engines.models import (
 logger = logging.getLogger(__name__)
 
 # Default minimum trade sizes per asset class
+# Crypto: Coinbase requires $10 minimum for market orders.
+# At BTC ~$85k, 0.00012 BTC ≈ $10.20 — gives a small buffer.
 MIN_TRADE_SIZES = {
     AssetClass.EQUITIES: 1.0,       # 1 share
-    AssetClass.CRYPTO: 0.0001,      # ~$4 of BTC
+    AssetClass.CRYPTO: 0.00012,     # ~$10.20 of BTC at $85k
     AssetClass.PREDICTIONS: 1.0,     # 1 contract
 }
 
