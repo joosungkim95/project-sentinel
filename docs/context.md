@@ -35,7 +35,7 @@ Jay is building Sentinel as a personal project. Experienced developer comfortabl
 - **Railway project:** https://railway.com/project/f440a704-9375-4faf-9a3b-2e614980c437
 - **Services:** sentinel (app), Postgres (DATABASE_URL linked), Redis (REDIS_URL linked)
 
-**Current state (2026-04-01):**
+**Current state (2026-04-02):**
 - 15 tiered strategies active (v5): 4 scouts, 7 core, 4 snipers
 - Confidence gates: scout 0.2, core 0.4, sniper 0.7
 - Market regime classifier: SMA slope + ATR ratio
@@ -47,6 +47,9 @@ Jay is building Sentinel as a personal project. Experienced developer comfortabl
 - Dashboard redesigned: trades panel now has All/Live/Paper tabs, platform badges, asset class filter, day-grouped layout, shadow status bar
 - Coinbase min order fix deployed: shadow crypto minimum bumped from 0.0001 to 0.00012 BTC (~$10.20) to clear Coinbase's $10 market order floor
 - Coinbase adapter now validates USD amount before submitting market buy orders
+- **Position exit system live** — PositionManager checks stop-loss (5%), take-profit (10%), max hold (7d) each cycle; SELL signals close matching open BUY positions; trade records get exit_time/exit_price/pnl populated
+- **Signal cooldown fixed** — datetime.utcnow() replaced with datetime.now(timezone.utc) across pipeline; 4-hour cooldown now actually enforced
+- **Batched Discord alerts** — position closes send one summary message instead of per-trade alerts
 
 **Env vars on Railway:** ALPACA_API_KEY, ALPACA_SECRET_KEY, COINBASE_API_KEY, COINBASE_API_SECRET, KALSHI_API_KEY, KALSHI_BASE_URL, KALSHI_PRIVATE_KEY, DATABASE_URL, REDIS_URL, DISCORD_WEBHOOK_URL, SHADOW_MODE, ANTHROPIC_API_KEY
 
@@ -117,11 +120,11 @@ Jay is building Sentinel as a personal project. Experienced developer comfortabl
 
 ## Post-Deploy Review Checklist
 
-Adapter connect fix deployed 2026-03-30. P&L enrichment deployed 2026-04-01. Review after ~24h runtime:
+Position exit system deployed 2026-04-02. Review after ~24h runtime:
 
-1. **Data feeds working?** — No `Failed to get candles/bars` errors in Railway logs
-2. **Signals generating?** — GET /health → shadow_stats.total_signals > 0
-3. **Confidence distribution?** — Check if signals cluster below gates vs passing through
-4. **Regime classifier?** — Look for regime classifications in logs/market_regimes table
+1. **Exits firing?** — Check Railway logs for "Position CLOSED" entries
+2. **P&L populated?** — GET /trades should show non-null pnl on closed trades
+3. **Cooldown working?** — vol_harvest_crypto should NOT fire more than once per 4 hours
+4. **Batched alerts?** — Discord should get single "Positions Closed" summaries, not per-trade floods
 5. **KCS-05?** — NFP Apr 3 window open since Mar 29, look for signals
-6. **P&L safety rules?** — Check that daily_pnl/weekly_pnl/drawdown_from_peak are non-zero in portfolio snapshots after trades close
+6. **Only 1/15 strategies firing?** — Investigate why other crypto/prediction strategies produce 0 signals despite schedulers cycling

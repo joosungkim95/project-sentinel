@@ -87,6 +87,29 @@ A running narrative of building a personal autonomous trading platform with Clau
 
 ---
 
+## Phase 6: The Missing Exit System (April 2, 2026)
+
+**The discovery:** Checked `/health` — system was running, crypto and predictions schedulers cycling normally, but only 1 signal generated in 2 hours. Dug into `/trades` and found the real problem: **positions were never being closed.** Every single trade had `pnl: null`. The DB columns `exit_time`, `exit_price`, `pnl` existed from day one but nothing ever populated them. The `close_position()` methods on the adapters existed but were never called.
+
+**The cascade:** This meant:
+- The P&L enrichment from the previous session was querying `WHERE pnl IS NOT NULL` — always returning 0
+- Risk Engine's daily/weekly P&L safety rules were seeing 0.0 forever
+- Portfolio value never reflected realized gains or losses
+- Positions accumulated indefinitely with no way to free up capital
+
+**Bug #1 — Signal cooldown broken:** `vol_harvest_crypto` was spamming BTC-USD BUY signals every hour despite a 4-hour cooldown. Root cause: `datetime.utcnow()` (naive) vs `datetime.now(timezone.utc)` (aware) — the subtraction silently failed or raised a TypeError, and the cooldown was never enforced.
+
+**Bug #2 — No exit logic anywhere:** Built a complete position exit system:
+- `PositionManager` checks stop-loss (5%), take-profit (10%), and max hold time (7 days) on every pipeline cycle
+- SELL signals from strategies (e.g., vol harvest detecting new volatility expansion) now close the matching open BUY position instead of trying to open a new trade
+- Trade records get `exit_time`, `exit_price`, `pnl`, `pnl_pct` populated
+
+**The alert flood:** First deploy closed ~56 accumulated open trades simultaneously, each sending its own Discord alert. Jay got flooded with messages tagged as "LIVE" trades (because `platform: null` on pre-tracking trades mapped to "unknown" which wasn't recognized as paper). Fixed by batching all exit alerts into a single summary message per cycle.
+
+**Lesson:** Build the full trade lifecycle (open → monitor → close) before deploying. Entry without exit isn't trading — it's hoarding.
+
+---
+
 ## Running Themes
 
 - **Cost obsession:** Everything is designed to stay under $30/mo. Haiku for routine calls, Sonnet only for strategy generation, prompt caching, no Kubernetes.
