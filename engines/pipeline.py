@@ -21,11 +21,13 @@ from engines.alerts import (
     alert_system_error,
 )
 from engines.execution.base import Executor
+from engines.execution.position_manager import PositionManager
 from engines.models import (
     AssetClass,
     MarketRegime,
     PortfolioSnapshot,
     RiskDecision,
+    Side,
     Signal,
     TradeResult,
 )
@@ -173,6 +175,38 @@ class TradingPipeline:
             "drawdown_from_peak": round(drawdown_from_peak, 2),
         })
 
+    def _get_position_manager(self) -> PositionManager | None:
+        """Create a PositionManager if we have a DB session and adapters."""
+        if not self._db_session:
+            return None
+        adapters = getattr(self.executor, "_adapters", {})
+        if not adapters:
+            # ShadowExecutor wraps real_executor
+            real = getattr(self.executor, "real_executor", None)
+            if real:
+                adapters = getattr(real, "_adapters", {})
+        return PositionManager(self._db_session, adapters)
+
+    async def check_exits(
+        self, asset_class: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """
+        Check all open positions for exit conditions (stop-loss, TP, max hold).
+
+        Should be called at the start of each pipeline cycle, before
+        generating new signals.
+
+        Args:
+            asset_class: Only check positions in this asset class.
+
+        Returns:
+            List of closed position details.
+        """
+        pm = self._get_position_manager()
+        if pm is None:
+            return []
+        return await pm.check_exits(asset_class=asset_class)
+
     @staticmethod
     def _scale_signal_to_portfolio(signal: Signal, portfolio_value: float) -> Signal:
         """Cap a signal's size to a tier-appropriate % of portfolio value.
@@ -218,6 +252,15 @@ class TradingPipeline:
             List of trade results (executed and rejected).
         """
         results: list[TradeResult] = []
+
+        # Check exit conditions on open positions before generating new signals
+        try:
+            closed = await self.check_exits()
+            if closed:
+                logger.info("Exit check: closed %d positions", len(closed))
+        except Exception as e:
+            logger.warning("Exit check failed: %s", e)
+
         portfolio = await self._get_enriched_snapshot()
 
         for strategy in self.strategies:
@@ -235,16 +278,21 @@ class TradingPipeline:
                 )
 
                 for signal in signals:
+                    # 2a. SELL signals close existing positions
+                    if signal.side == Side.SELL:
+                        await self._handle_sell_signal(signal)
+                        continue
+
                     # 2b. Cooldown check — skip if same signal was recently executed
                     cooldown_key = (signal.strategy_id, signal.symbol, signal.side.value)
                     last_exec = self._last_executed.get(cooldown_key)
-                    if last_exec and (datetime.utcnow() - last_exec) < self._signal_cooldown:
+                    if last_exec and (datetime.now(timezone.utc) - last_exec) < self._signal_cooldown:
                         logger.info(
                             "Signal COOLDOWN: %s %s %s — last executed %s ago",
                             signal.side.value,
                             signal.symbol,
                             signal.strategy_id,
-                            datetime.utcnow() - last_exec,
+                            datetime.now(timezone.utc) - last_exec,
                         )
                         continue
 
@@ -281,7 +329,7 @@ class TradingPipeline:
                     results.append(trade_result)
 
                     if trade_result.executed:
-                        self._last_executed[cooldown_key] = datetime.utcnow()
+                        self._last_executed[cooldown_key] = datetime.now(timezone.utc)
                         self.risk_engine.record_trade(signal)
                         logger.info(
                             "Trade EXECUTED: %s %s @ %s (strategy: %s)",
@@ -468,6 +516,17 @@ class TradingPipeline:
         """
         results: list[TradeResult] = []
         timeframe = TIER_TIMEFRAMES[tier][asset_class_str]
+
+        # Check exit conditions on open positions before generating new signals
+        try:
+            closed = await self.check_exits(asset_class=asset_class_str)
+            if closed:
+                logger.info(
+                    "Exit check [%s/%s]: closed %d positions",
+                    tier.value, asset_class_str, len(closed),
+                )
+        except Exception as e:
+            logger.warning("Exit check failed: %s", e)
 
         active = [
             s for s in strategies
@@ -676,22 +735,29 @@ class TradingPipeline:
     ) -> TradeResult | None:
         """Evaluate a signal through risk engine and execute if approved.
 
+        SELL signals are routed to the position manager to close matching
+        open positions. BUY signals follow the normal risk → execute flow.
+
         Args:
             signal: Trading signal to evaluate.
 
         Returns:
-            TradeResult if a trade was attempted, None if rejected.
+            TradeResult if a trade was attempted, None if rejected/closed.
         """
-        # Cooldown check
+        # SELL signals close existing positions instead of opening new ones
+        if signal.side == Side.SELL:
+            return await self._handle_sell_signal(signal)
+
+        # Cooldown check (BUY signals only)
         cooldown_key = (signal.strategy_id, signal.symbol, signal.side.value)
         last_exec = self._last_executed.get(cooldown_key)
-        if last_exec and (datetime.utcnow() - last_exec) < self._signal_cooldown:
+        if last_exec and (datetime.now(timezone.utc) - last_exec) < self._signal_cooldown:
             logger.info(
                 "Signal COOLDOWN: %s %s %s — last executed %s ago",
                 signal.side.value,
                 signal.symbol,
                 signal.strategy_id,
-                datetime.utcnow() - last_exec,
+                datetime.now(timezone.utc) - last_exec,
             )
             return None
 
@@ -726,7 +792,7 @@ class TradingPipeline:
         trade_result = await self.executor.execute(risk_result)
 
         if trade_result.executed:
-            self._last_executed[cooldown_key] = datetime.utcnow()
+            self._last_executed[cooldown_key] = datetime.now(timezone.utc)
             self.risk_engine.record_trade(signal)
             logger.info(
                 "Trade EXECUTED: %s %s @ %s (strategy: %s)",
@@ -735,11 +801,6 @@ class TradingPipeline:
                 trade_result.fill_price,
                 signal.strategy_id,
             )
-            # NOTE: Discord alert is sent by run_cycle() which calls this method.
-            # Do NOT alert here to avoid duplicate notifications.
-            # TODO: If we switch from shadow mode to live-only trading,
-            # revisit whether alerting should move here instead of run_cycle()
-            # (e.g., if _evaluate_and_execute is called from non-alerting paths).
         else:
             logger.warning(
                 "Trade FAILED: %s %s — %s",
@@ -762,6 +823,37 @@ class TradingPipeline:
 
         return trade_result
 
+    async def _handle_sell_signal(self, signal: Signal) -> TradeResult | None:
+        """Route a SELL signal to close a matching open position.
+
+        Instead of opening a new short position, this finds the oldest
+        open BUY trade from the same strategy/symbol and closes it.
+        Returns None if no matching position is found.
+        """
+        pm = self._get_position_manager()
+        if pm is None:
+            logger.debug(
+                "SELL signal ignored (no position manager): %s %s",
+                signal.strategy_id, signal.symbol,
+            )
+            return None
+
+        result = await pm.close_for_sell_signal(signal)
+        if result:
+            logger.info(
+                "Position CLOSED via SELL signal: %s %s pnl=%.4f (%.2f%%)",
+                result["strategy_id"],
+                result["symbol"],
+                result["pnl"],
+                result["pnl_pct"],
+            )
+        else:
+            logger.debug(
+                "SELL signal — no open position to close: %s %s",
+                signal.strategy_id, signal.symbol,
+            )
+        return None
+
     def _should_activate_circuit_breaker(self, portfolio) -> bool:
         """Check if conditions warrant activating the circuit breaker."""
         # This is a secondary check — the Risk Engine also checks on each signal.
@@ -772,7 +864,7 @@ class TradingPipeline:
     async def _log_outcome(self, signal, risk_result, trade_result) -> None:
         """Log the full outcome for the Learning Engine to ingest."""
         self._trade_log.append({
-            "timestamp": datetime.utcnow().isoformat(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
             "signal": signal.model_dump(),
             "risk_decision": risk_result.decision.value,
             "risk_reasons": risk_result.rejection_reasons,
