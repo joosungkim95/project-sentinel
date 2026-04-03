@@ -110,6 +110,30 @@ A running narrative of building a personal autonomous trading platform with Clau
 
 ---
 
+## Phase 7: The Cooldown That Never Cooled & The Silent Strategies (April 3, 2026)
+
+**The first real "operations review":** Checked in on Sentinel after ~24 hours of runtime. Jay noticed risk stops firing. The data told the story: vol_harvest_crypto was the only strategy generating signals, and the Risk Engine had rejected 20 out of 26 signals (77% blocked) as BTC trended down. Total paper P&L: -$639.61. The Risk Engine was doing its job — but the cooldown wasn't.
+
+**Bug #1 — Cooldown was a no-op:** The datetime fix from the previous session (naive vs aware) was correct but irrelevant. The real bug was architectural: the scheduler creates a **new TradingPipeline instance every cycle** (`_run_tier_cycle()` at scheduler.py:250). The `_last_executed` dict lived on the pipeline instance, so it was born empty every 60 minutes. The cooldown could never remember a previous execution.
+
+**The fix:** Replaced the in-memory dict with a DB query against the trades table. `_is_on_cooldown()` checks `WHERE strategy_id = ? AND symbol = ? AND side = ? AND created_at >= (now - 4 hours)`. Survives pipeline recreation, process restarts, and deploys. Also catches rejected signals (which are stored in the same table), so vol_harvest won't spam the Risk Engine with hourly rejections either.
+
+**Bug #2 — 14/15 strategies were silent:** Dug into why only vol_harvest_crypto fired across 403 crypto cycles, 331 prediction cycles, and 45 equity cycles. Found three cascading data pipeline issues in the prediction strategies:
+
+1. **`run_tier` was dropping `crypto_bars`:** Line 581 re-wrapped `pred_data` as `{"markets": ...}`, stripping out the `crypto_bars` key. KCS-02 and KCS-05 always saw empty crypto bars → failed vol calculation → returned zero signals.
+
+2. **Wrong market schema for KCS-02/KCS-05:** The pipeline called `get_markets()` (minimal schema: ticker, title, yes_bid, no_bid, volume, status) for all prediction strategies. But KCS-02 and KCS-05 need `strike_price` and `close_time` — fields only available from `get_crypto_markets()`. Every market failed the null check at line 184 and returned None.
+
+3. **Value pricing starved of fields:** `get_markets()` was also missing `yes_ask`, `no_ask`, and `open_interest` — all required by the value_pricing strategy's liquidity filters.
+
+**The fix:** Routed crypto prediction strategies to `get_crypto_markets()`, passed the full `pred_data` dict instead of re-wrapping, and added the missing fields to `get_markets()`.
+
+**Not bugs:** Equities only running during market hours (correct), other crypto strategies (breakout, trend_following) not firing in a trending-down/high-volatility regime (their conditions are genuinely strict for current market conditions).
+
+**Lesson:** In-memory state in a system where instances are recreated is no state at all. And when debugging "no output" from multiple independent subsystems, check whether each one is receiving the data schema it expects — a shared data fetch function serving different consumers can silently starve some of them.
+
+---
+
 ## Running Themes
 
 - **Cost obsession:** Everything is designed to stay under $30/mo. Haiku for routine calls, Sonnet only for strategy generation, prompt caching, no Kubernetes.
