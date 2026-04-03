@@ -249,7 +249,10 @@ class KalshiAdapter:
                     "title": m.get("title"),
                     "yes_bid": m.get("yes_bid", 0) / 100,
                     "no_bid": m.get("no_bid", 0) / 100,
+                    "yes_ask": m.get("yes_ask", 0) / 100,
+                    "no_ask": m.get("no_ask", 0) / 100,
                     "volume": m.get("volume", 0),
+                    "open_interest": m.get("open_interest", 0),
                     "status": m.get("status"),
                 }
                 for m in data.get("markets", [])

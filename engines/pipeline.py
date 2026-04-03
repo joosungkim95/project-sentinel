@@ -100,8 +100,48 @@ class TradingPipeline:
         self._db_session = db_session
         self._trade_log: list[dict[str, Any]] = []
         self._signal_cooldown = signal_cooldown or self.DEFAULT_SIGNAL_COOLDOWN
-        # Tracks last executed time per (strategy_id, symbol, side)
-        self._last_executed: dict[tuple[str, str, str], datetime] = {}
+
+    async def _is_on_cooldown(
+        self, strategy_id: str, symbol: str, side: str,
+    ) -> bool:
+        """Check if a signal is on cooldown by querying recent trades in the DB.
+
+        Survives pipeline recreation and process restarts because state
+        is persisted in the trades table, not in-memory.
+
+        Args:
+            strategy_id: Strategy that generated the signal.
+            symbol: Trading symbol.
+            side: "buy" or "sell".
+
+        Returns:
+            True if a matching trade was recorded within the cooldown window.
+        """
+        if not self._db_session:
+            return False
+
+        cutoff = datetime.now(timezone.utc) - self._signal_cooldown
+        stmt = (
+            select(TradeRecord.created_at)
+            .where(
+                TradeRecord.strategy_id == strategy_id,
+                TradeRecord.symbol == symbol,
+                TradeRecord.side == side,
+                TradeRecord.created_at >= cutoff,
+            )
+            .order_by(TradeRecord.created_at.desc())
+            .limit(1)
+        )
+        result = await self._db_session.execute(stmt)
+        last = result.scalar_one_or_none()
+        if last is not None:
+            ago = datetime.now(timezone.utc) - last
+            logger.info(
+                "Signal COOLDOWN: %s %s %s — last trade %s ago (window: %s)",
+                side, symbol, strategy_id, ago, self._signal_cooldown,
+            )
+            return True
+        return False
 
     async def _get_enriched_snapshot(self) -> PortfolioSnapshot:
         """Get portfolio snapshot with real P&L and drawdown values.
@@ -283,17 +323,10 @@ class TradingPipeline:
                         await self._handle_sell_signal(signal)
                         continue
 
-                    # 2b. Cooldown check — skip if same signal was recently executed
-                    cooldown_key = (signal.strategy_id, signal.symbol, signal.side.value)
-                    last_exec = self._last_executed.get(cooldown_key)
-                    if last_exec and (datetime.now(timezone.utc) - last_exec) < self._signal_cooldown:
-                        logger.info(
-                            "Signal COOLDOWN: %s %s %s — last executed %s ago",
-                            signal.side.value,
-                            signal.symbol,
-                            signal.strategy_id,
-                            datetime.now(timezone.utc) - last_exec,
-                        )
+                    # 2b. Cooldown check — skip if same signal was recently traded
+                    if await self._is_on_cooldown(
+                        signal.strategy_id, signal.symbol, signal.side.value,
+                    ):
                         continue
 
                     # 2c. Scale position size to portfolio
@@ -329,7 +362,6 @@ class TradingPipeline:
                     results.append(trade_result)
 
                     if trade_result.executed:
-                        self._last_executed[cooldown_key] = datetime.now(timezone.utc)
                         self.risk_engine.record_trade(signal)
                         logger.info(
                             "Trade EXECUTED: %s %s @ %s (strategy: %s)",
@@ -434,39 +466,53 @@ class TradingPipeline:
     ) -> dict[str, Any]:
         """Fetch market listings and quotes for prediction market strategies."""
         try:
-            get_markets = getattr(adapter, "get_markets", None)
             get_quote = getattr(adapter, "get_quote", None)
-            if get_markets is None:
-                return {}
-
             limit = strategy.parameters.get("scan_limit", 50)
-            markets = await get_markets(limit=limit)
 
-            # Enrich with full quote data if adapter supports it
-            if get_quote and markets:
-                enriched = []
-                for m in markets:
-                    ticker = m.get("ticker", "")
-                    if not ticker:
-                        continue
-                    try:
-                        quote = await get_quote(ticker)
-                        m.update(quote)
-                    except Exception:
-                        pass  # Use basic market data
-                    enriched.append(m)
-                markets = enriched
-
-            logger.debug(
-                "Fetched %d prediction markets (%s)",
-                len(markets),
-                strategy.strategy_id,
-            )
-
-            # Fetch crypto bars for probability-model strategies (KCS-02, KCS-05)
+            # KCS-02/KCS-05 need crypto-specific markets with strike_price/close_time
             needs_crypto = getattr(strategy, 'needs_crypto_bars', False)
             if not needs_crypto and hasattr(strategy, 'strategy_id'):
                 needs_crypto = 'prob' in strategy.strategy_id or 'catalyst' in strategy.strategy_id
+
+            if needs_crypto:
+                get_crypto_markets = getattr(adapter, "get_crypto_markets", None)
+                if get_crypto_markets is not None:
+                    markets = await get_crypto_markets(limit=limit)
+                    logger.debug(
+                        "Fetched %d crypto prediction markets (%s)",
+                        len(markets), strategy.strategy_id,
+                    )
+                else:
+                    logger.warning(
+                        "Adapter lacks get_crypto_markets for %s",
+                        strategy.strategy_id,
+                    )
+                    markets = []
+            else:
+                get_markets = getattr(adapter, "get_markets", None)
+                if get_markets is None:
+                    return {}
+                markets = await get_markets(limit=limit)
+
+                # Enrich with full quote data if adapter supports it
+                if get_quote and markets:
+                    enriched = []
+                    for m in markets:
+                        ticker = m.get("ticker", "")
+                        if not ticker:
+                            continue
+                        try:
+                            quote = await get_quote(ticker)
+                            m.update(quote)
+                        except Exception:
+                            pass  # Use basic market data
+                        enriched.append(m)
+                    markets = enriched
+
+                logger.debug(
+                    "Fetched %d prediction markets (%s)",
+                    len(markets), strategy.strategy_id,
+                )
             if needs_crypto:
                 coinbase = self.executor._adapters.get(AssetClass.CRYPTO)
                 if coinbase:
@@ -546,7 +592,7 @@ class TradingPipeline:
                         adapter, strategy,
                     )
                     signals = await strategy.generate_signals(
-                        bars={"markets": pred_data.get("markets", [])},
+                        bars=pred_data,
                         market_regime=market_regime,
                     )
                     if signals:
@@ -748,17 +794,10 @@ class TradingPipeline:
         if signal.side == Side.SELL:
             return await self._handle_sell_signal(signal)
 
-        # Cooldown check (BUY signals only)
-        cooldown_key = (signal.strategy_id, signal.symbol, signal.side.value)
-        last_exec = self._last_executed.get(cooldown_key)
-        if last_exec and (datetime.now(timezone.utc) - last_exec) < self._signal_cooldown:
-            logger.info(
-                "Signal COOLDOWN: %s %s %s — last executed %s ago",
-                signal.side.value,
-                signal.symbol,
-                signal.strategy_id,
-                datetime.now(timezone.utc) - last_exec,
-            )
+        # Cooldown check (BUY signals only) — uses DB, survives pipeline recreation
+        if await self._is_on_cooldown(
+            signal.strategy_id, signal.symbol, signal.side.value,
+        ):
             return None
 
         portfolio = await self._get_enriched_snapshot()
@@ -792,7 +831,6 @@ class TradingPipeline:
         trade_result = await self.executor.execute(risk_result)
 
         if trade_result.executed:
-            self._last_executed[cooldown_key] = datetime.now(timezone.utc)
             self.risk_engine.record_trade(signal)
             logger.info(
                 "Trade EXECUTED: %s %s @ %s (strategy: %s)",
