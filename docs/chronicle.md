@@ -156,6 +156,29 @@ A running narrative of building a personal autonomous trading platform with Clau
 
 ---
 
+## Phase 9: The Weekend Review (April 5, 2026)
+
+**First weekend operations check:** Jay asked to evaluate crypto and prediction strategies over the weekend (equities don't run on weekends). The data told a clearer story than expected — but required careful timeline analysis.
+
+**The timeline trap:** At first glance, the last 24 hours of crypto trades looked terrible: 7 vol_harvest BUY signals, all losing, all in high_volatility regime despite a trend filter that should block exactly this. But cross-referencing with deploy times revealed the truth: commit 9cfe400 (which added the trend filter, tier-aware cooldowns, and live price refresh) didn't deploy until 04:25 UTC on Apr 5. Every single trade in the "last 24 hours" was running the *old* code.
+
+**Post-deploy: silence is golden.** After the fix deployed, vol_harvest completed 11 sniper_crypto cycles with zero BUY signals — exactly correct behavior in a high_volatility regime. The trend filter is working. The stale price fix and 24h sniper cooldown are also deployed but untestable until the regime shifts and a signal actually fires.
+
+**Cooldown archaeology:** Traced the cooldown through three evolutionary stages:
+1. In-memory dict (pre Apr 3) — completely broken, reset every cycle when scheduler recreated TradingPipeline. Breakout_crypto fired 12 times in 55 minutes.
+2. DB-backed, flat 4h (Apr 3) — survived restarts but wrong for snipers. Produced ~5h gaps.
+3. DB-backed, tier-aware (Apr 5) — scout 2h, core 4h, sniper 24h. Current and correct. Also triggers on rejected signals (intentional — prevents hammering the risk engine with the same doomed signal).
+
+**The prediction market mystery:** 5 strategies, 161+ scheduler cycles, zero trades. Ever. The scheduler was running, the cycles were completing, but every strategy was returning empty-handed. Root cause: **Kalshi demo API has no real trading activity.** The demo environment returns markets with zero volume/open_interest, and possibly no open KXBTC series at all. Every strategy's liquidity filters silently dropped every market. All of this was logged at DEBUG level — completely invisible in production logs.
+
+**The fix (two parts):**
+1. Jay switched Kalshi to the live API with observe-only mode (KALSHI_BASE_URL → trading-api.kalshi.com, KALSHI_OBSERVE_ONLY=true) — real market data, simulated fills.
+2. Upgraded all prediction strategy failure-point logs from DEBUG to WARNING with detailed skip-reason breakdowns. Now Railway logs will show exactly which bottleneck kills signals: `{missing_fields: 5, low_volume: 12, no_edge: 3}` instead of silence.
+
+**Lesson:** Demo APIs are great for testing auth and order flow, but worthless for testing signal generation that depends on real market activity. And when a subsystem produces zero output for 161 consecutive cycles, the logging should scream — not whisper at DEBUG level.
+
+---
+
 ## Running Themes
 
 - **Cost obsession:** Everything is designed to stay under $30/mo. Haiku for routine calls, Sonnet only for strategy generation, prompt caching, no Kubernetes.

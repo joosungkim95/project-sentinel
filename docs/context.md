@@ -43,19 +43,19 @@ Jay is building Sentinel as a personal project. Experienced developer comfortabl
 - All 3 platform adapters connected (Alpaca, Coinbase, Kalshi)
 - P&L/drawdown enrichment live — HardFloor, DailyLoss, WeeklyDrawdown safety rules now read real values
 - Repo is public (no secrets committed)
-- Alembic migrations up to b2c3d4e5f6a7 (adds platform column to trades table — auto-runs on deploy)
+- Alembic migrations up to b2c3d4e5f6a7 (adds platform column to trades table ��� auto-runs on deploy)
 - Dashboard redesigned: trades panel now has All/Live/Paper tabs, platform badges, asset class filter, day-grouped layout, shadow status bar
 - Coinbase min order fix deployed: shadow crypto minimum bumped from 0.0001 to 0.00012 BTC (~$10.20) to clear Coinbase's $10 market order floor
 - Coinbase adapter now validates USD amount before submitting market buy orders
 - **Position exit system live** — PositionManager checks stop-loss (5%), take-profit (10%), max hold (7d) each cycle; SELL signals close matching open BUY positions; trade records get exit_time/exit_price/pnl populated
-- **Signal cooldown fixed (DB-backed)** — replaced in-memory cooldown dict (was reset every cycle because scheduler recreates TradingPipeline) with DB query against trades table; survives pipeline recreation, process restarts, and deploys
+- **Signal cooldown fixed (DB-backed, tier-aware)** — replaced in-memory cooldown dict (was reset every cycle because scheduler recreates TradingPipeline) with DB query against trades table; tier-aware windows: scout 2h, core 4h, sniper 24h; rejected signals also trigger cooldown (intentional — prevents hammering risk engine)
 - **Batched Discord alerts** — position closes send one summary message instead of per-trade alerts
 - **Prediction strategies unblocked** — KCS-02/KCS-05 now use get_crypto_markets() for full schema (strike_price, close_time); run_tier passes full pred_data dict (was dropping crypto_bars); get_markets() now includes yes_ask/no_ask/open_interest for value_pricing
 - **Live price refresh** — pipeline now fetches spot price via adapter.get_quote() before risk check and execution, replacing stale bar-close prices (especially on daily-bar strategies)
-- **Tier-aware cooldowns** — scout 2h, core 4h, sniper 24h (was flat 4h for all); prevents daily-bar strategies from re-entering the same pattern intraday
 - **Shadow market orders** — shadow executor now clears target_price on min-size live trades, forcing market orders instead of limit orders; fixes 0% live fill rate
 - **Confidence recalibration** — raised base scores on 7 core/scout strategy confidence formulas so single-trigger-plus-confluence signals clear tier gates; addresses 14 silent strategies
-- **Vol harvest trend filter** — BUY suppressed when regime is trending_down/high_volatility or 20-period SMA is declining; stops buying vol crush into downtrends
+- **Vol harvest trend filter** — BUY suppressed when regime is trending_down/high_volatility or 20-period SMA is declining; stops buying vol crush into downtrends. Verified working post-deploy: 0 signals across 11 sniper_crypto cycles since Apr 5 04:25 UTC deploy
+- **Prediction strategy diagnostics** — upgraded all silent failure logs from DEBUG to WARNING/INFO with skip-reason breakdowns ({missing_fields, low_volume, low_oi, no_edge}) so Railway logs show exactly where each prediction strategy's signal pipeline breaks down
 
 **Env vars on Railway:** ALPACA_API_KEY, ALPACA_SECRET_KEY, COINBASE_API_KEY, COINBASE_API_SECRET, KALSHI_API_KEY, KALSHI_BASE_URL, KALSHI_PRIVATE_KEY, KALSHI_OBSERVE_ONLY, DATABASE_URL, REDIS_URL, DISCORD_WEBHOOK_URL, SHADOW_MODE, ANTHROPIC_API_KEY
 
@@ -69,7 +69,7 @@ Jay is building Sentinel as a personal project. Experienced developer comfortabl
 |----------|--------|------|-------|
 | Alpaca | Connected on Railway | Paper trading | `ALPACA_BASE_URL=https://paper-api.alpaca.markets` |
 | Coinbase | Connected on Railway | Real money (shadow min-size ~$10) | COINBASE_API_SECRET PEM added via Railway Variables |
-| Kalshi | Connected on Railway | Live (observe-only) | `KALSHI_BASE_URL=https://trading-api.kalshi.co`, `KALSHI_OBSERVE_ONLY=true` |
+| Kalshi | Connected on Railway | Live (observe-only) | `KALSHI_BASE_URL=https://trading-api.kalshi.com`, `KALSHI_OBSERVE_ONLY=true` (switched from demo Apr 4) |
 | Polymarket | Blocked | N/A | US trading restricted |
 
 **Shadow mode:** All trades execute at minimum size (1 share / 0.00012 BTC / 1 contract) on real platforms, full-size paper simulations tracked in parallel.
@@ -126,11 +126,11 @@ Jay is building Sentinel as a personal project. Experienced developer comfortabl
 
 ## Post-Deploy Review Checklist
 
-DB-backed cooldown + prediction strategy fixes deployed 2026-04-03. Review after ~24h:
+Prediction diagnostic logging deployed 2026-04-05. Review after next few cycles:
 
-1. **Cooldown working?** — vol_harvest_crypto should fire once per 4 hours max, not hourly. Look for "Signal COOLDOWN" log entries with DB-sourced timestamps
-2. **Prediction strategies firing?** — KCS-02/KCS-05 should now get crypto markets with strike_price/close_time. Look for "Fetched N crypto prediction markets" in logs
-3. **Value pricing getting data?** — Check if yes_ask/no_ask/open_interest fields flow through to value_pricing strategy
-4. **KCS-05 + NFP?** — NFP is Apr 3, event window should be active. Look for KCS-05 signals
-5. **Equity strategies during market hours?** — Verify Alpaca returns bar data during 9:30-16:00 ET
-6. **Shadow divergence?** — Still showing 0% fill rate match on Coinbase live. Investigate if min order size fix is working
+1. **Prediction strategy logs visible?** — Check Railway logs for WARNING-level messages from all 5 prediction strategies. Should now see specific skip reasons (missing_fields, low_volume, low_oi, no_edge) instead of silence
+2. **Kalshi live API returning data?** — Jay switched KALSHI_BASE_URL to live API (Apr 4). Look for "Fetched N crypto markets" / "Fetched N prediction markets" counts > 0
+3. **Crypto bars flowing to KCS-02/KCS-05?** — Look for "Fetched N crypto bars for prob model" or "insufficient bars for vol" warning
+4. **KCS-05 catalyst window?** — CPI Apr 14 should enter 5-day pre-positioning window around Apr 9. FOMC May 6.
+5. **Vol harvest trend filter holding?** — Confirmed working: 0 BUY signals across 11 sniper_crypto cycles since deploy. Should stay quiet in high_volatility regime
+6. **Cooldown enforcement?** — Sniper 24h cooldown deployed. Can't verify with data yet (trend filter blocking all vol_harvest signals). Will be testable when regime shifts

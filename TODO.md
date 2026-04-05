@@ -92,6 +92,9 @@
 - [ ] Promote from shadow mode to larger position sizes once strategies prove profitable
 - [x] Implement proper market regime classifier (SMA slope + ATR ratio, persisted to DB, inline + daily)
 - [x] Re-evaluate vol_harvest_crypto strategy quality: added trend filter — BUY suppressed when regime=trending_down/high_volatility or 20-period SMA is declining. SELL signals still allowed.
+- [x] Prediction strategy diagnostic logging — upgraded DEBUG→WARNING with skip-reason breakdowns
+- [ ] Verify prediction strategies generate signals on live Kalshi API (check Railway logs after deploy)
+- [ ] Fix pre-existing test failures in test_crypto_probability.py (2 tests — test data doesn't produce enough edge for probability model)
 
 ## Kalshi Crypto Strategy Roadmap (KCS)
 - [x] KCS-02: Implied probability vs spot divergence (probability model + strategy)
