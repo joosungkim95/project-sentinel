@@ -57,7 +57,7 @@ Jay is building Sentinel as a personal project. Experienced developer comfortabl
 - **Confidence recalibration** — raised base scores on 7 core/scout strategy confidence formulas so single-trigger-plus-confluence signals clear tier gates; addresses 14 silent strategies
 - **Vol harvest trend filter** — BUY suppressed when regime is trending_down/high_volatility or 20-period SMA is declining; stops buying vol crush into downtrends
 
-**Env vars on Railway:** ALPACA_API_KEY, ALPACA_SECRET_KEY, COINBASE_API_KEY, COINBASE_API_SECRET, KALSHI_API_KEY, KALSHI_BASE_URL, KALSHI_PRIVATE_KEY, DATABASE_URL, REDIS_URL, DISCORD_WEBHOOK_URL, SHADOW_MODE, ANTHROPIC_API_KEY
+**Env vars on Railway:** ALPACA_API_KEY, ALPACA_SECRET_KEY, COINBASE_API_KEY, COINBASE_API_SECRET, KALSHI_API_KEY, KALSHI_BASE_URL, KALSHI_PRIVATE_KEY, KALSHI_OBSERVE_ONLY, DATABASE_URL, REDIS_URL, DISCORD_WEBHOOK_URL, SHADOW_MODE, ANTHROPIC_API_KEY
 
 **Deploy gotcha:** Railway aggressively caches Docker layers. If pip install or COPY layers show "cached" when they shouldn't, change the Dockerfile comment near that line to bust the cache.
 
@@ -69,7 +69,7 @@ Jay is building Sentinel as a personal project. Experienced developer comfortabl
 |----------|--------|------|-------|
 | Alpaca | Connected on Railway | Paper trading | `ALPACA_BASE_URL=https://paper-api.alpaca.markets` |
 | Coinbase | Connected on Railway | Real money (shadow min-size ~$10) | COINBASE_API_SECRET PEM added via Railway Variables |
-| Kalshi | Connected on Railway | Demo | `KALSHI_BASE_URL=https://demo-api.kalshi.co` |
+| Kalshi | Connected on Railway | Live (observe-only) | `KALSHI_BASE_URL=https://trading-api.kalshi.co`, `KALSHI_OBSERVE_ONLY=true` |
 | Polymarket | Blocked | N/A | US trading restricted |
 
 **Shadow mode:** All trades execute at minimum size (1 share / 0.00012 BTC / 1 contract) on real platforms, full-size paper simulations tracked in parallel.

@@ -13,6 +13,7 @@ from engines.models import (
     PortfolioSnapshot,
     PositionInfo,
     RiskCheckResult,
+    RiskDecision,
     TradeResult,
 )
 
@@ -23,6 +24,11 @@ class PlatformAdapter(ABC):
 
     Implement one per platform: Alpaca, Coinbase, Kalshi.
     """
+
+    # When True, data methods hit the real API but execute_trade returns
+    # a simulated fill.  This lets strategies evaluate against live data
+    # without risking real money.
+    observe_only: bool = False
 
     @property
     @abstractmethod
@@ -111,6 +117,9 @@ class Executor:
         """
         Execute an approved trade on the appropriate platform.
 
+        If the adapter is in observe_only mode, returns a simulated fill
+        using the signal's target price instead of placing a real order.
+
         Args:
             approved_signal: Must have decision == APPROVED or REDUCED.
 
@@ -130,7 +139,29 @@ class Executor:
                 error_message=f"No adapter registered for {asset_class.value}",
             )
 
+        if adapter.observe_only:
+            return self._simulate_fill(approved_signal, adapter.platform_name)
+
         return await adapter.execute_trade(approved_signal)
+
+    @staticmethod
+    def _simulate_fill(
+        approved_signal: RiskCheckResult, platform_name: str,
+    ) -> TradeResult:
+        """Return a simulated fill for observe-only adapters."""
+        signal = approved_signal.original_signal
+        qty = approved_signal.approved_quantity or signal.quantity
+        return TradeResult(
+            trade_id=f"observe-{signal.strategy_id}-{signal.symbol}",
+            signal=signal,
+            risk_check=approved_signal,
+            executed=True,
+            fill_price=signal.target_price,
+            fill_quantity=qty,
+            commission=0.0,
+            slippage=0.0,
+            platform=f"observe_{platform_name}",
+        )
 
     async def get_portfolio_snapshot(self) -> PortfolioSnapshot:
         """Aggregate portfolio across all platforms."""

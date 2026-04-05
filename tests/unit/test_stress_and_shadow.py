@@ -189,6 +189,7 @@ class TestShadowExecutor:
         mock_adapter = AsyncMock()
         mock_adapter.platform_name = "mock_equities"
         mock_adapter.asset_class = AssetClass.EQUITIES
+        mock_adapter.observe_only = False
 
         signal = make_signal()
         mock_adapter.execute_trade = AsyncMock(return_value=TradeResult(
@@ -267,6 +268,7 @@ class TestShadowExecutor:
         mock_adapter = AsyncMock()
         mock_adapter.platform_name = "mock"
         mock_adapter.asset_class = AssetClass.EQUITIES
+        mock_adapter.observe_only = False
 
         signal = make_signal()
         mock_adapter.execute_trade = AsyncMock(return_value=TradeResult(

@@ -286,6 +286,7 @@ POLYMARKET_PRIVATE_KEY=  # Polygon wallet
 # Kalshi
 KALSHI_API_KEY=
 KALSHI_BASE_URL=https://demo-api.kalshi.co  # Switch for live
+KALSHI_OBSERVE_ONLY=  # Set "true" to use live data with simulated fills (no real orders)
 
 # Claude API (for Learning Engine)
 ANTHROPIC_API_KEY=

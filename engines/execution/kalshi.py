@@ -45,6 +45,7 @@ class KalshiAdapter:
         api_key: str,
         private_key_pem: str,
         base_url: str = "https://demo-api.kalshi.co",
+        observe_only: bool = False,
     ):
         """
         Initialize Kalshi adapter.
@@ -53,11 +54,13 @@ class KalshiAdapter:
             api_key: API Key ID (UUID format).
             private_key_pem: RSA private key in PEM format.
             base_url: API base URL (demo or production).
+            observe_only: If True, use live data but simulate fills.
         """
         self.api_key = api_key
         self.base_url = base_url.rstrip("/")
         self.api_base = f"{self.base_url}/trade-api/v2"
         self._client = httpx.AsyncClient(timeout=30.0)
+        self.observe_only = observe_only
 
         # Parse the PEM private key
         pem = private_key_pem.replace("\\n", "\n").encode()

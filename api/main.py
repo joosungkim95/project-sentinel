@@ -132,14 +132,17 @@ async def _build_executor() -> Executor:
         try:
             from engines.execution.kalshi import KalshiAdapter
 
+            kalshi_observe = os.getenv("KALSHI_OBSERVE_ONLY", "").lower() in ("true", "1", "yes")
             adapter = KalshiAdapter(
                 api_key=os.environ["KALSHI_API_KEY"],
                 private_key_pem=os.environ["KALSHI_PRIVATE_KEY"],
                 base_url=os.getenv("KALSHI_BASE_URL", "https://demo-api.kalshi.co"),
+                observe_only=kalshi_observe,
             )
             if await adapter.connect():
                 executor.register_adapter(adapter)
-                logger.info("Kalshi adapter connected and registered")
+                mode = "observe-only" if kalshi_observe else "live"
+                logger.info("Kalshi adapter connected and registered (%s)", mode)
             else:
                 logger.warning("Kalshi adapter failed to connect — not registered")
         except Exception as e:
