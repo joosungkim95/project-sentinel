@@ -101,6 +101,7 @@ class NewsDrivenStrategy(Strategy):
         """
         markets = bars.get("markets", [])
         if not markets:
+            logger.warning("%s: no markets available to scan", self.strategy_id)
             return []
 
         scored: list[tuple[float, dict, str]] = []
@@ -110,6 +111,12 @@ class NewsDrivenStrategy(Strategy):
             if result:
                 score, direction = result
                 scored.append((score, market, direction))
+
+        if not scored:
+            logger.warning(
+                "%s: 0 repricing events in %d markets",
+                self.strategy_id, len(markets),
+            )
 
         # Sort by score, take top N
         scored.sort(key=lambda x: x[0], reverse=True)

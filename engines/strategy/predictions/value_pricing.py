@@ -101,18 +101,34 @@ class ValuePricingStrategy(Strategy):
         """
         markets = bars.get("markets", [])
         if not markets:
-            logger.debug("No prediction markets available to scan")
+            logger.warning(
+                "%s: no markets available to scan — check Kalshi API response",
+                self.strategy_id,
+            )
             return []
 
         opportunities: list[dict[str, Any]] = []
+        skip_reasons: dict[str, int] = {}
 
         for market in markets:
             opp = self._evaluate_market(market)
             if opp is not None:
                 opportunities.append(opp)
+            else:
+                vol = int(market.get("volume", 0))
+                oi = int(market.get("open_interest", 0))
+                if vol < self.parameters["min_volume"]:
+                    skip_reasons["low_volume"] = skip_reasons.get("low_volume", 0) + 1
+                elif oi < self.parameters["min_open_interest"]:
+                    skip_reasons["low_oi"] = skip_reasons.get("low_oi", 0) + 1
+                else:
+                    skip_reasons["no_edge"] = skip_reasons.get("no_edge", 0) + 1
 
         if not opportunities:
-            logger.debug("No prediction market opportunities found in %d markets", len(markets))
+            logger.warning(
+                "%s: 0 opportunities in %d markets — skips: %s",
+                self.strategy_id, len(markets), dict(skip_reasons),
+            )
             return []
 
         # Sort by edge (best opportunities first)

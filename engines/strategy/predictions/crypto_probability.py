@@ -107,7 +107,7 @@ class CryptoProbabilityStrategy(Strategy):
         crypto_bars = bars.get("crypto_bars", [])
 
         if not markets:
-            logger.debug("KCS-02: no markets to scan")
+            logger.warning("KCS-02: no markets to scan — check Kalshi API response")
             return []
 
         # Extract close prices once for vol calculation
@@ -115,27 +115,41 @@ class CryptoProbabilityStrategy(Strategy):
         vol = calc_realized_vol(closes)
 
         if vol is None:
-            logger.debug(
-                "KCS-02: insufficient bars for vol (%d < 48 required)", len(closes)
+            logger.warning(
+                "KCS-02: insufficient bars for vol (%d bars, need 48) — crypto_bars may be missing",
+                len(closes),
             )
             return []
 
         # Current spot = last close price
         spot = closes[-1] if closes else None
         if spot is None or spot <= 0:
-            logger.debug("KCS-02: no valid spot price")
+            logger.warning("KCS-02: no valid spot price from crypto bars")
             return []
 
         opportunities: list[dict[str, Any]] = []
         scan_limit = self.parameters["scan_limit"]
+        skip_reasons: dict[str, int] = {}
 
         for market in markets[:scan_limit]:
             opp = self._evaluate_market(market, spot, vol)
             if opp is not None:
                 opportunities.append(opp)
+            else:
+                # Track why markets were skipped
+                ticker = market.get("ticker", "?")
+                if not market.get("strike_price") or not market.get("close_time"):
+                    skip_reasons["missing_fields"] = skip_reasons.get("missing_fields", 0) + 1
+                elif int(market.get("volume", 0)) < self.parameters["min_volume"]:
+                    skip_reasons["low_volume"] = skip_reasons.get("low_volume", 0) + 1
+                else:
+                    skip_reasons["no_edge"] = skip_reasons.get("no_edge", 0) + 1
 
         if not opportunities:
-            logger.debug("KCS-02: no opportunities in %d markets (spot=%.0f vol=%.2f)", len(markets), spot, vol)
+            logger.warning(
+                "KCS-02: 0 opportunities in %d markets (spot=%.0f vol=%.2f) — skips: %s",
+                len(markets), spot, vol, dict(skip_reasons),
+            )
             return []
 
         # Sort by absolute edge magnitude (best first)

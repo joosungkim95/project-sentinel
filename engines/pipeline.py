@@ -488,10 +488,18 @@ class TradingPipeline:
                 get_crypto_markets = getattr(adapter, "get_crypto_markets", None)
                 if get_crypto_markets is not None:
                     markets = await get_crypto_markets(limit=limit)
-                    logger.debug(
-                        "Fetched %d crypto prediction markets (%s)",
-                        len(markets), strategy.strategy_id,
-                    )
+                    if markets:
+                        has_strike = sum(1 for m in markets if m.get("strike_price"))
+                        has_close = sum(1 for m in markets if m.get("close_time"))
+                        logger.info(
+                            "Fetched %d crypto markets (%s) — %d have strike_price, %d have close_time",
+                            len(markets), strategy.strategy_id, has_strike, has_close,
+                        )
+                    else:
+                        logger.warning(
+                            "Kalshi returned 0 crypto markets for %s (series=KXBTC, status=open)",
+                            strategy.strategy_id,
+                        )
                 else:
                     logger.warning(
                         "Adapter lacks get_crypto_markets for %s",
@@ -519,12 +527,23 @@ class TradingPipeline:
                         enriched.append(m)
                     markets = enriched
 
-                logger.debug(
-                    "Fetched %d prediction markets (%s)",
-                    len(markets), strategy.strategy_id,
-                )
+                if markets:
+                    logger.info(
+                        "Fetched %d prediction markets (%s)",
+                        len(markets), strategy.strategy_id,
+                    )
+                else:
+                    logger.warning(
+                        "Kalshi returned 0 markets for %s",
+                        strategy.strategy_id,
+                    )
             if needs_crypto:
                 coinbase = self.executor._adapters.get(AssetClass.CRYPTO)
+                if not coinbase:
+                    logger.warning(
+                        "No CRYPTO adapter registered — %s cannot fetch bars for vol calc",
+                        strategy.strategy_id,
+                    )
                 if coinbase:
                     try:
                         fetch_bars = getattr(coinbase, "get_historical_bars", None)

@@ -127,29 +127,40 @@ class EventCatalystStrategy(Strategy):
             lookahead_days=self.parameters["lookahead_days"],
         )
         if not catalysts:
-            logger.debug("KCS-05: no catalysts in %d-day window", self.parameters["lookahead_days"])
+            logger.info("KCS-05: no catalysts in %d-day window", self.parameters["lookahead_days"])
             return []
 
         # Filter to actionable events (within pre-positioning window)
         actionable = self._filter_actionable(catalysts, today)
         if not actionable:
-            logger.debug(
-                "KCS-05: %d catalysts found but none in pre-positioning window",
+            logger.info(
+                "KCS-05: %d catalysts found but none in %d–%d day pre-positioning window",
                 len(catalysts),
+                self.parameters["min_days_before_event"],
+                self.parameters["max_days_before_event"],
             )
             return []
+
+        logger.info(
+            "KCS-05: %d actionable catalysts — %s",
+            len(actionable),
+            ", ".join(f"{c['name']} in {c['days_to_event']}d" for c in actionable),
+        )
 
         markets = bars.get("markets", [])
         crypto_bars = bars.get("crypto_bars", [])
 
         if not markets:
-            logger.debug("KCS-05: no markets to scan")
+            logger.warning("KCS-05: no markets to scan — check Kalshi API response")
             return []
 
         closes = [float(b["close"]) for b in crypto_bars if "close" in b]
         base_vol = calc_realized_vol(closes)
         if base_vol is None:
-            logger.debug("KCS-05: insufficient bars for vol (%d)", len(closes))
+            logger.warning(
+                "KCS-05: insufficient bars for vol (%d bars, need 48) — crypto_bars may be missing",
+                len(closes),
+            )
             return []
 
         spot = closes[-1] if closes else None
@@ -172,8 +183,8 @@ class EventCatalystStrategy(Strategy):
                     opportunities.append(opp)
 
         if not opportunities:
-            logger.debug(
-                "KCS-05: no opportunities (events=%d, markets=%d, spot=%.0f, vol=%.2f)",
+            logger.warning(
+                "KCS-05: 0 opportunities (events=%d, markets=%d, spot=%.0f, vol=%.2f)",
                 len(actionable), len(markets), spot, base_vol,
             )
             return []
