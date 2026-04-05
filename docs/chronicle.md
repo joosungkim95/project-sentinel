@@ -134,6 +134,28 @@ A running narrative of building a personal autonomous trading platform with Clau
 
 ---
 
+## Phase 8: The Performance Audit (April 5, 2026)
+
+**The first strategy review:** Pulled up the `/trades` and `/health` endpoints to see how Sentinel performed on April 3. The data was sobering: `vol_harvest_crypto` was the *only* strategy firing, generating 7 BUY signals on BTC-USD, all losing (-$491 paper P&L). Every other strategy — all 14 of them — produced zero signals across hundreds of cycles.
+
+**Six bugs found, all different root causes:**
+
+**Bug #1 — Stale prices:** All 7 trades showed identical entry prices ($87,171.68) despite being hours apart. Root cause: `vol_harvest_crypto` uses daily candles, and `current_price = closes[-1]` just grabbed the incomplete daily bar's close — which doesn't change until midnight. The quantity calculation and limit orders all used this frozen number. Fix: pipeline now fetches a live spot price via `adapter.get_quote()` before risk check.
+
+**Bug #2 — Cooldown too short for snipers:** 7 signals in one day on the same symbol suggested cooldown wasn't working. But after checking deploy times, the first 4 trades were pre-cooldown-fix (old in-memory code). The last 3 were 5 hours apart — just past the 4-hour cooldown window. The 4h flat cooldown was wrong for a daily-bar strategy where conditions persist all day. Fix: tier-aware cooldowns (scout 2h, core 4h, sniper 24h).
+
+**Bug #3 — Risk engine working as designed:** All signals were "reduced" (quantity halved). This was `WeeklyDrawdownRule` cutting position sizes by 50% due to accumulated losses. Not a bug — the risk engine was doing its job.
+
+**Bug #4 — Shadow mode 0% live fills:** Shadow stats showed 3 live attempts, 3 failures, 0 executions. The shadow executor passed the original signal (with `target_price` set) to Coinbase, causing limit orders instead of market orders. At $10 minimum size, limit orders at stale prices are unreliable. Fix: clear `target_price` on shadow min-size trades so the adapter uses market orders.
+
+**Bug #5 — 14 silent strategies:** This was the deepest investigation. All adapters connected, all cycles completing without errors, just no signals making it through. Root cause: confidence formulas were calibrated for the original gates (scout 0.3, core 0.5) but gates were lowered in Phase 6 (0.2, 0.4) without recalibrating the formulas. A core strategy with a single trigger typically produced 0.20-0.35 confidence — below the 0.4 gate. Fix: raised base component scores across 7 strategies so a single trigger + one confluence factor clears the gate.
+
+**Bug #6 — Vol harvest buying into downtrends:** The strategy's thesis (buy after vol crush, expect mean reversion) only works in ranging/bullish markets. In a sustained downtrend, the "vol crush" is just a pause before more selling. Strategy had no trend filter at all. Fix: suppress BUY when regime is `trending_down`/`high_volatility` or SMA slope is negative.
+
+**Lesson:** A trading system can be architecturally sound but operationally broken in six different ways simultaneously. The issues weren't in the framework — they were in the calibration, the data freshness, the order types, and the strategy logic. Infrastructure gets you running; operations reviews keep you profitable.
+
+---
+
 ## Running Themes
 
 - **Cost obsession:** Everything is designed to stay under $30/mo. Haiku for routine calls, Sonnet only for strategy generation, prompt caching, no Kubernetes.

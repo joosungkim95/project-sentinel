@@ -3,7 +3,7 @@
 > **This file is the single source of truth for remote Claude sessions (dispatch/cowork).**
 > It mirrors the local memory system. Updated at the end of every session.
 >
-> Last updated: 2026-04-01
+> Last updated: 2026-04-05
 
 ---
 
@@ -35,7 +35,7 @@ Jay is building Sentinel as a personal project. Experienced developer comfortabl
 - **Railway project:** https://railway.com/project/f440a704-9375-4faf-9a3b-2e614980c437
 - **Services:** sentinel (app), Postgres (DATABASE_URL linked), Redis (REDIS_URL linked)
 
-**Current state (2026-04-03):**
+**Current state (2026-04-05):**
 - 15 tiered strategies active (v5): 4 scouts, 7 core, 4 snipers
 - Confidence gates: scout 0.2, core 0.4, sniper 0.7
 - Market regime classifier: SMA slope + ATR ratio
@@ -51,6 +51,11 @@ Jay is building Sentinel as a personal project. Experienced developer comfortabl
 - **Signal cooldown fixed (DB-backed)** — replaced in-memory cooldown dict (was reset every cycle because scheduler recreates TradingPipeline) with DB query against trades table; survives pipeline recreation, process restarts, and deploys
 - **Batched Discord alerts** — position closes send one summary message instead of per-trade alerts
 - **Prediction strategies unblocked** — KCS-02/KCS-05 now use get_crypto_markets() for full schema (strike_price, close_time); run_tier passes full pred_data dict (was dropping crypto_bars); get_markets() now includes yes_ask/no_ask/open_interest for value_pricing
+- **Live price refresh** — pipeline now fetches spot price via adapter.get_quote() before risk check and execution, replacing stale bar-close prices (especially on daily-bar strategies)
+- **Tier-aware cooldowns** — scout 2h, core 4h, sniper 24h (was flat 4h for all); prevents daily-bar strategies from re-entering the same pattern intraday
+- **Shadow market orders** — shadow executor now clears target_price on min-size live trades, forcing market orders instead of limit orders; fixes 0% live fill rate
+- **Confidence recalibration** — raised base scores on 7 core/scout strategy confidence formulas so single-trigger-plus-confluence signals clear tier gates; addresses 14 silent strategies
+- **Vol harvest trend filter** — BUY suppressed when regime is trending_down/high_volatility or 20-period SMA is declining; stops buying vol crush into downtrends
 
 **Env vars on Railway:** ALPACA_API_KEY, ALPACA_SECRET_KEY, COINBASE_API_KEY, COINBASE_API_SECRET, KALSHI_API_KEY, KALSHI_BASE_URL, KALSHI_PRIVATE_KEY, DATABASE_URL, REDIS_URL, DISCORD_WEBHOOK_URL, SHADOW_MODE, ANTHROPIC_API_KEY
 
