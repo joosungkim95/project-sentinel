@@ -322,19 +322,19 @@ class ValuePricingStrategy(Strategy):
 
         Larger edge + tighter spread + higher volume = higher confidence.
         """
-        # Edge contribution (0-0.5): bigger edge = better
-        edge_score = min(opp["edge"] / 0.20, 0.5)
+        # Edge contribution (0-0.55): bigger edge = better
+        edge_score = min(opp["edge"] / 0.15, 0.55)
 
         # Spread contribution (0-0.25): tighter = better
         spread = opp.get("spread", 0.10)
         spread_score = max(0.25 - (spread / 0.20) * 0.25, 0.0)
 
-        # Volume contribution (0-0.25): more volume = more reliable pricing
+        # Volume contribution (0-0.20): more volume = more reliable pricing
         volume = opp.get("volume", 0)
-        vol_score = min(volume / 2000.0, 0.25)
+        vol_score = min(volume / 1500.0, 0.20)
 
         confidence = edge_score + spread_score + vol_score
-        return min(max(confidence, 0.1), 1.0)
+        return min(max(confidence, 0.15), 1.0)
 
     @staticmethod
     def _classify_strength(confidence: float) -> SignalStrength:

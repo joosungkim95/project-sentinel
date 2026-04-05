@@ -94,16 +94,36 @@ class TestATR:
 class TestBuySignal:
 
     @pytest.mark.asyncio
-    async def test_buy_after_vol_crush(self):
-        """Generates BUY after volatility spike followed by crush."""
+    async def test_buy_suppressed_in_high_volatility(self):
+        """No BUY when regime is HIGH_VOLATILITY (trend filter)."""
         strategy = VolatilityHarvestStrategy()
         bars = make_vol_spike_then_crush()
         signals = await strategy.generate_signals(
             {"BTC-USD": bars}, MarketRegime.HIGH_VOLATILITY
         )
         buys = [s for s in signals if s.side == Side.BUY]
-        # May or may not trigger depending on exact thresholds
-        # The pattern is designed to trigger, but floating point...
+        assert len(buys) == 0
+
+    @pytest.mark.asyncio
+    async def test_buy_suppressed_in_downtrend(self):
+        """No BUY when regime is TRENDING_DOWN."""
+        strategy = VolatilityHarvestStrategy()
+        bars = make_vol_spike_then_crush()
+        signals = await strategy.generate_signals(
+            {"BTC-USD": bars}, MarketRegime.TRENDING_DOWN
+        )
+        buys = [s for s in signals if s.side == Side.BUY]
+        assert len(buys) == 0
+
+    @pytest.mark.asyncio
+    async def test_buy_allowed_in_ranging_market(self):
+        """BUY can fire when regime is RANGING and SMA is flat/rising."""
+        strategy = VolatilityHarvestStrategy()
+        bars = make_vol_spike_then_crush()
+        signals = await strategy.generate_signals(
+            {"BTC-USD": bars}, MarketRegime.RANGING
+        )
+        # Pattern may or may not clear thresholds, but regime doesn't block it
         assert isinstance(signals, list)
 
     @pytest.mark.asyncio

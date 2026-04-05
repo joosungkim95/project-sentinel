@@ -252,12 +252,12 @@ class PullbackStrategy(Strategy):
         fib_score = 0.0
 
         if near_ema:
-            # Closer to EMA = higher score (0.20-0.35)
-            ema_score = max(0.35 - ema_distance * 50, 0.20)
+            # Closer to EMA = higher score (0.30-0.45)
+            ema_score = max(0.45 - ema_distance * 50, 0.30)
 
         if near_fib:
-            # Closer to Fib = higher score (0.20-0.35)
-            fib_score = max(0.35 - fib_distance * 50, 0.20)
+            # Closer to Fib = higher score (0.30-0.45)
+            fib_score = max(0.45 - fib_distance * 50, 0.30)
 
         # Volume declining = healthy pullback (0.10 bonus)
         vol_bonus = 0.10 if vol_declining else 0.0
@@ -273,7 +273,7 @@ class PullbackStrategy(Strategy):
         confluence = 0.10 if (near_ema and near_fib) else 0.0
 
         confidence = ema_score + fib_score + vol_bonus + trend_score + confluence
-        return min(max(confidence, 0.20), 1.0)
+        return min(max(confidence, 0.30), 1.0)
 
     @staticmethod
     def _calc_ema(prices: np.ndarray, period: int) -> np.ndarray | None:

@@ -306,19 +306,19 @@ class MomentumStrategy(Strategy):
         vol_score = 0.0
 
         if rsi_bullish:
-            # RSI contribution (0.15-0.40): closer to 65 = higher
+            # RSI contribution (0.20-0.45): closer to 65 = higher
             rsi_distance_from_sweet = abs(rsi - 65.0)
-            rsi_score = max(0.40 - (rsi_distance_from_sweet / 50.0), 0.15)
+            rsi_score = max(0.45 - (rsi_distance_from_sweet / 50.0), 0.20)
 
         if volume_strong:
-            # Volume contribution (0.15-0.40): higher ratio = higher
-            vol_score = min(0.15 + (vol_ratio - 1.0) / 3.0, 0.40)
+            # Volume contribution (0.20-0.45): higher ratio = higher
+            vol_score = min(0.20 + (vol_ratio - 1.0) / 3.0, 0.45)
 
         # Confluence bonus: both triggers confirming
         confluence_bonus = 0.10 if (rsi_bullish and volume_strong) else 0.0
 
         confidence = rsi_score + vol_score + confluence_bonus
-        return min(max(confidence, 0.15), 1.0)
+        return min(max(confidence, 0.20), 1.0)
 
     @staticmethod
     def _calc_sell_confidence(rsi: float) -> float:

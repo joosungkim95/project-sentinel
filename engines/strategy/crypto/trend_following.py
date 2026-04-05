@@ -418,12 +418,12 @@ class TrendFollowingStrategy(Strategy):
         OR-relaxed confidence: EMA bullish is primary, ADX and price
         are confluence boosts.
         """
-        # EMA spread (0.20-0.40): wider = stronger trend
+        # EMA spread (0.30-0.45): wider = stronger trend
         if slow_ema > 0:
             spread_pct = abs(fast_ema - slow_ema) / slow_ema * 100
         else:
             spread_pct = 0.0
-        ema_score = min(0.20 + spread_pct / 4.0, 0.40)
+        ema_score = min(0.30 + spread_pct / 4.0, 0.45)
 
         # Fresh crossover bonus (0 or 0.15)
         cross_bonus = 0.15 if just_crossed else 0.0
@@ -440,7 +440,7 @@ class TrendFollowingStrategy(Strategy):
             price_score = min(0.05 + above_pct / 3.0, 0.15)
 
         confidence = ema_score + cross_bonus + adx_score + price_score
-        return min(max(confidence, 0.20), 1.0)
+        return min(max(confidence, 0.30), 1.0)
 
     @staticmethod
     def _calc_sell_confidence(

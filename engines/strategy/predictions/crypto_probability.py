@@ -340,21 +340,21 @@ class CryptoProbabilityStrategy(Strategy):
         yes_spread = opp["yes_spread"]
         volume = opp["volume"]
 
-        # Edge contribution (0-0.45): 15pp = full score
-        edge_score = min(edge_pp / 15.0, 1.0) * 0.45
+        # Edge contribution (0-0.50): 12pp = full score
+        edge_score = min(edge_pp / 12.0, 1.0) * 0.50
 
-        # Kelly contribution (0-0.25): kelly=0.3 = full score
-        kelly_score = min(kelly / 0.3, 1.0) * 0.25
+        # Kelly contribution (0-0.25): kelly=0.25 = full score
+        kelly_score = min(kelly / 0.25, 1.0) * 0.25
 
         # Spread tightness (0-0.15): 0 spread = full, max_spread = 0
         max_spread = 0.05
         spread_score = max(1.0 - yes_spread / max_spread, 0.0) * 0.15
 
-        # Volume contribution (0-0.15): 500 contracts = full score
-        vol_score = min(volume / 500.0, 1.0) * 0.15
+        # Volume contribution (0-0.10): 400 contracts = full score
+        vol_score = min(volume / 400.0, 1.0) * 0.10
 
         confidence = edge_score + kelly_score + spread_score + vol_score
-        return min(max(confidence, 0.1), 1.0)
+        return min(max(confidence, 0.15), 1.0)
 
     @staticmethod
     def _classify_strength(confidence: float) -> SignalStrength:

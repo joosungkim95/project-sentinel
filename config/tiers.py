@@ -25,6 +25,16 @@ TIER_CONFIDENCE_THRESHOLD: dict[StrategyTier, float] = {
 # Strategies define a fixed position_size_usd as an upper bound, but the
 # pipeline will cap the actual trade to this % of portfolio so that small
 # accounts are not overexposed.
+# Signal cooldown per tier — minimum hours between trades on the same
+# (strategy, symbol, side).  Scouts scan fast so they cool down quickly;
+# snipers use daily bars whose patterns persist all day, so they need a
+# full-day cooldown to avoid re-entering the same signal.
+TIER_COOLDOWN_HOURS: dict[StrategyTier, float] = {
+    StrategyTier.SCOUT: 2.0,
+    StrategyTier.CORE: 4.0,
+    StrategyTier.SNIPER: 24.0,
+}
+
 TIER_MAX_POSITION_PCT: dict[StrategyTier, float] = {
     StrategyTier.SCOUT: 3.0,   # Small, exploratory bets
     StrategyTier.CORE: 5.0,    # Balanced, confirmed setups

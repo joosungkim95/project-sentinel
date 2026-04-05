@@ -159,7 +159,25 @@ class VolatilityHarvestStrategy(Strategy):
         now_crushed = width_ratio <= crush_thresh
         atr_calming = atr_decline >= atr_decline_thresh
 
-        if had_spike and now_crushed and atr_calming:
+        # Trend filter: don't buy vol crush into a downtrend.
+        # The strategy assumes mean-reversion after calm, but in a
+        # sustained downtrend the "calm" is just a pause before more selling.
+        bearish_regime = market_regime in (
+            MarketRegime.TRENDING_DOWN,
+            MarketRegime.HIGH_VOLATILITY,
+        )
+        sma_period = self.parameters["bb_period"]  # reuse BB period (20)
+        sma = np.mean(closes[-sma_period:])
+        sma_prev = np.mean(closes[-sma_period - 5 : -5])
+        sma_declining = sma < sma_prev
+
+        if bearish_regime or sma_declining:
+            logger.debug(
+                "VolHarvest %s: BUY suppressed — regime=%s sma_declining=%s",
+                symbol, market_regime.value, sma_declining,
+            )
+            # Still allow SELL signals below
+        elif had_spike and now_crushed and atr_calming:
             confidence = self._calc_confidence(
                 width_ratio, peak_ratio, atr_decline,
             )

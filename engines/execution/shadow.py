@@ -190,10 +190,14 @@ class ShadowExecutor:
         signal = approved_signal.original_signal
         min_size = self.min_sizes.get(signal.asset_class, 1.0)
 
-        # Create a modified signal with minimum quantity
+        # Clear target_price so the adapter uses a market order.
+        # Shadow min-size trades should fill immediately — limit orders
+        # at stale prices can sit unfilled or get rejected.
+        market_signal = signal.model_copy(update={"target_price": None})
+
         min_signal = RiskCheckResult(
             decision=approved_signal.decision,
-            original_signal=signal,
+            original_signal=market_signal,
             approved_quantity=min_size,
             risk_utilization_pct=approved_signal.risk_utilization_pct,
             portfolio_value=approved_signal.portfolio_value,

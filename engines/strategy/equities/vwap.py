@@ -267,24 +267,24 @@ class VWAPStrategy(Strategy):
 
         Larger deviations from VWAP = higher probability of reversion.
         """
-        # Z-score magnitude (0.20-0.45)
+        # Z-score magnitude (0.30-0.50)
         z_abs = abs(z_score_abs)
-        z_score_comp = min(0.20 + (z_abs - 1.5) / 5.0, 0.45)
+        z_score_comp = min(0.30 + (z_abs - 1.5) / 4.0, 0.50)
 
         # Deviation percentage (0.10-0.25)
-        dev_score = min(0.10 + deviation_pct / 5.0, 0.25)
+        dev_score = min(0.10 + deviation_pct / 4.0, 0.25)
 
         # Volume trend: increasing volume near VWAP band = more conviction
         if len(volumes) >= 5:
             recent_vol = np.mean(volumes[-5:])
             avg_vol = np.mean(volumes)
             vol_ratio = recent_vol / avg_vol if avg_vol > 0 else 1.0
-            vol_score = min(max(vol_ratio - 0.8, 0) / 3.0, 0.20)
+            vol_score = min(max(vol_ratio - 0.8, 0) / 2.5, 0.20)
         else:
             vol_score = 0.0
 
         confidence = z_score_comp + dev_score + vol_score
-        return min(max(confidence, 0.20), 1.0)
+        return min(max(confidence, 0.30), 1.0)
 
     async def get_performance(self, period_days: int) -> StrategyPerformance:
         """Calculate performance metrics. TODO: implement with DB."""

@@ -311,20 +311,20 @@ class MeanReversionStrategy(Strategy):
         rsi_score = 0.0
 
         if bb_triggered:
-            # Distance below band (0.15-0.40)
-            band_score = min(0.15 + max(-pct_b, 0) * 1.5, 0.40)
+            # Distance below band (0.25-0.45)
+            band_score = min(0.25 + max(-pct_b, 0) * 1.5, 0.45)
 
         if rsi_triggered:
-            # RSI oversold depth (0.15-0.40)
-            rsi_score = min(0.15 + max((40 - rsi) / 40, 0) * 0.25, 0.40)
+            # RSI oversold depth (0.25-0.45)
+            rsi_score = min(0.25 + max((40 - rsi) / 40, 0) * 0.25, 0.45)
 
         # Wider bands = more volatile = less confident
-        width_penalty = min(bb_width * 1.5, 0.15)
+        width_penalty = min(bb_width * 1.5, 0.10)
         # Confluence bonus
         confluence = 0.10 if (bb_triggered and rsi_triggered) else 0.0
 
         confidence = band_score + rsi_score + confluence - width_penalty
-        return min(max(confidence, 0.15), 1.0)
+        return min(max(confidence, 0.25), 1.0)
 
     @staticmethod
     def _calc_sell_confidence(
@@ -339,16 +339,16 @@ class MeanReversionStrategy(Strategy):
         rsi_score = 0.0
 
         if bb_triggered:
-            band_score = min(0.15 + max(pct_b - 1.0, 0) * 1.5, 0.40)
+            band_score = min(0.25 + max(pct_b - 1.0, 0) * 1.5, 0.45)
 
         if rsi_triggered:
-            rsi_score = min(0.15 + max((rsi - 60) / 40, 0) * 0.25, 0.40)
+            rsi_score = min(0.25 + max((rsi - 60) / 40, 0) * 0.25, 0.45)
 
-        width_penalty = min(bb_width * 1.5, 0.15)
+        width_penalty = min(bb_width * 1.5, 0.10)
         confluence = 0.10 if (bb_triggered and rsi_triggered) else 0.0
 
         confidence = band_score + rsi_score + confluence - width_penalty
-        return min(max(confidence, 0.15), 1.0)
+        return min(max(confidence, 0.25), 1.0)
 
     @staticmethod
     def _classify_strength(confidence: float) -> SignalStrength:

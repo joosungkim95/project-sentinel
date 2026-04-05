@@ -37,6 +37,7 @@ from memory.market_regime import MarketRegimeTracker, classify_from_bars as clas
 from config.tiers import (
     COINBASE_TIMEFRAME_MAP,
     StrategyTier,
+    TIER_COOLDOWN_HOURS,
     TIER_MAX_POSITION_PCT,
     TIER_TIMEFRAMES,
     TIMEFRAME_AGGREGATION,
@@ -83,7 +84,7 @@ class TradingPipeline:
     4. All outcomes are logged for the Learning Engine
     """
 
-    # Skip duplicate signals from the same strategy/symbol/side within this window.
+    # Fallback cooldown when tier is unknown (matches old behaviour).
     DEFAULT_SIGNAL_COOLDOWN = timedelta(hours=4)
 
     def __init__(
@@ -92,17 +93,23 @@ class TradingPipeline:
         executor: Executor,
         strategies: list[Strategy],
         db_session: AsyncSession | None = None,
-        signal_cooldown: timedelta | None = None,
     ):
         self.risk_engine = risk_engine
         self.executor = executor
         self.strategies = strategies
         self._db_session = db_session
         self._trade_log: list[dict[str, Any]] = []
-        self._signal_cooldown = signal_cooldown or self.DEFAULT_SIGNAL_COOLDOWN
+
+    def _cooldown_for_tier(self, tier: StrategyTier) -> timedelta:
+        """Return the cooldown window for a given strategy tier."""
+        hours = TIER_COOLDOWN_HOURS.get(tier)
+        if hours is not None:
+            return timedelta(hours=hours)
+        return self.DEFAULT_SIGNAL_COOLDOWN
 
     async def _is_on_cooldown(
         self, strategy_id: str, symbol: str, side: str,
+        tier: StrategyTier = StrategyTier.CORE,
     ) -> bool:
         """Check if a signal is on cooldown by querying recent trades in the DB.
 
@@ -113,6 +120,7 @@ class TradingPipeline:
             strategy_id: Strategy that generated the signal.
             symbol: Trading symbol.
             side: "buy" or "sell".
+            tier: Strategy tier — determines the cooldown window.
 
         Returns:
             True if a matching trade was recorded within the cooldown window.
@@ -120,7 +128,8 @@ class TradingPipeline:
         if not self._db_session:
             return False
 
-        cutoff = datetime.now(timezone.utc) - self._signal_cooldown
+        cooldown = self._cooldown_for_tier(tier)
+        cutoff = datetime.now(timezone.utc) - cooldown
         stmt = (
             select(TradeRecord.created_at)
             .where(
@@ -137,8 +146,8 @@ class TradingPipeline:
         if last is not None:
             ago = datetime.now(timezone.utc) - last
             logger.info(
-                "Signal COOLDOWN: %s %s %s — last trade %s ago (window: %s)",
-                side, symbol, strategy_id, ago, self._signal_cooldown,
+                "Signal COOLDOWN: %s %s %s — last trade %s ago (window: %s [%s])",
+                side, symbol, strategy_id, ago, cooldown, tier.value,
             )
             return True
         return False
@@ -326,6 +335,7 @@ class TradingPipeline:
                     # 2b. Cooldown check — skip if same signal was recently traded
                     if await self._is_on_cooldown(
                         signal.strategy_id, signal.symbol, signal.side.value,
+                        tier=signal.tier,
                     ):
                         continue
 
@@ -797,8 +807,13 @@ class TradingPipeline:
         # Cooldown check (BUY signals only) — uses DB, survives pipeline recreation
         if await self._is_on_cooldown(
             signal.strategy_id, signal.symbol, signal.side.value,
+            tier=signal.tier,
         ):
             return None
+
+        # Refresh target_price with live spot price — strategies set it from
+        # bar close which can be stale (especially on daily timeframes)
+        signal = await self._refresh_signal_price(signal)
 
         portfolio = await self._get_enriched_snapshot()
 
@@ -860,6 +875,59 @@ class TradingPipeline:
             )
 
         return trade_result
+
+    async def _refresh_signal_price(self, signal: Signal) -> Signal:
+        """Replace target_price with the live spot price from the adapter.
+
+        Strategies compute target_price from bar closes, which can be stale
+        (e.g., daily bars return the same incomplete candle close all day).
+        This fetches the real-time price so risk checks and execution use
+        an accurate number.
+
+        Args:
+            signal: Signal with potentially stale target_price.
+
+        Returns:
+            Signal with refreshed target_price (unchanged on failure).
+        """
+        adapters = getattr(self.executor, "_adapters", {})
+        if not adapters:
+            real = getattr(self.executor, "real_executor", None)
+            if real:
+                adapters = getattr(real, "_adapters", {})
+
+        adapter = adapters.get(signal.asset_class)
+        if adapter is None:
+            return signal
+
+        try:
+            quote = await adapter.get_quote(signal.symbol)
+            live_price = quote.get("price")
+            if live_price and live_price > 0:
+                old_price = signal.target_price
+                signal = signal.model_copy(
+                    update={
+                        "target_price": live_price,
+                        "quantity": round(
+                            signal.position_size_usd / live_price, 8,
+                        ) if signal.position_size_usd > 0 else signal.quantity,
+                    },
+                )
+                logger.debug(
+                    "Price refreshed %s: %.2f → %.2f (Δ%.2f%%)",
+                    signal.symbol,
+                    old_price or 0,
+                    live_price,
+                    ((live_price - old_price) / old_price * 100)
+                    if old_price else 0,
+                )
+        except Exception as e:
+            logger.warning(
+                "Failed to refresh price for %s: %s — using bar close",
+                signal.symbol, e,
+            )
+
+        return signal
 
     async def _handle_sell_signal(self, signal: Signal) -> TradeResult | None:
         """Route a SELL signal to close a matching open position.
