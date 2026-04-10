@@ -36,14 +36,15 @@ from engines.models import (
 
 logger = logging.getLogger(__name__)
 
-# Default minimum trade sizes per asset class
-# Crypto: Coinbase requires $10 minimum for market orders.
-# At BTC ~$85k, 0.00012 BTC ≈ $10.20 — gives a small buffer.
+# Default minimum trade sizes per asset class (non-crypto)
 MIN_TRADE_SIZES = {
     AssetClass.EQUITIES: 1.0,       # 1 share
-    AssetClass.CRYPTO: 0.00012,     # ~$10.20 of BTC at $85k
     AssetClass.PREDICTIONS: 1.0,     # 1 contract
 }
+
+# Coinbase requires $10 minimum for market orders.
+# We target $11 to give a buffer against price fluctuations.
+MIN_CRYPTO_USD = 11.0
 
 
 @dataclass
@@ -188,7 +189,13 @@ class ShadowExecutor:
     ) -> TradeResult:
         """Execute at minimum size on the real platform."""
         signal = approved_signal.original_signal
-        min_size = self.min_sizes.get(signal.asset_class, 1.0)
+
+        # Compute minimum size — crypto needs a USD-aware calculation
+        # because 0.00012 BTC ≈ $10 but 0.00012 ETH ≈ $0.25.
+        if signal.asset_class == AssetClass.CRYPTO:
+            min_size = await self._crypto_min_quantity(signal.symbol)
+        else:
+            min_size = self.min_sizes.get(signal.asset_class, 1.0)
 
         # Clear target_price so the adapter uses a market order.
         # Shadow min-size trades should fill immediately — limit orders
@@ -209,6 +216,26 @@ class ShadowExecutor:
         except Exception as e:
             logger.error("Shadow live execution failed: %s", e)
             return self._make_skipped_result(signal, str(e))
+
+    async def _crypto_min_quantity(self, symbol: str) -> float:
+        """Compute the minimum crypto quantity that clears Coinbase's $10 floor.
+
+        Fetches the live price and returns MIN_CRYPTO_USD / price.
+        Falls back to a conservative BTC-sized default on failure.
+        """
+        adapter = self._adapters.get(AssetClass.CRYPTO)
+        if adapter is None:
+            return 0.00015  # Fallback for BTC
+
+        try:
+            quote = await adapter.get_quote(symbol)
+            price = quote.get("price", 0)
+            if price > 0:
+                return round(MIN_CRYPTO_USD / price, 8)
+        except Exception as e:
+            logger.warning("Failed to get price for crypto min-size: %s", e)
+
+        return 0.00015  # Fallback for BTC
 
     def _simulate_paper(self, approved_signal: RiskCheckResult) -> TradeResult:
         """Simulate a paper trade at full approved size."""

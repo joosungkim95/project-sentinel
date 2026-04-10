@@ -94,7 +94,14 @@
 - [x] Re-evaluate vol_harvest_crypto strategy quality: added trend filter — BUY suppressed when regime=trending_down/high_volatility or 20-period SMA is declining. SELL signals still allowed.
 - [x] Prediction strategy diagnostic logging — upgraded DEBUG→WARNING with skip-reason breakdowns
 - [ ] Verify prediction strategies generate signals on live Kalshi API (check Railway logs after deploy)
-- [ ] Fix pre-existing test failures in test_crypto_probability.py (2 tests — test data doesn't produce enough edge for probability model)
+- [x] Fix pre-existing test failures in test_crypto_probability.py — CLOSE_TIME was hardcoded in the past, now uses now+3d
+- [x] Fix stuck positions — PositionManager was returning early when live price unavailable, skipping max_hold check
+- [x] Fix shadow live fill failures — MIN_TRADE_SIZES[CRYPTO] was BTC-specific (0.00012), now USD-based per symbol
+- [x] Fix run_cycle parameter mismatch (market_data= → bars=) — dead code but correct now
+- [x] Lower prediction strategy thresholds (min_volume, min_edge) across value_pricing, market_skimmer, news_driven, KCS-02, KCS-05
+- [x] news_driven fallback — uses yes_ask/no_ask midpoint vs implied fair when Kalshi doesn't provide prev_price/avg_volume
+- [ ] Verify 20 stuck vol_harvest BTC positions auto-close on next cycle after deploy
+- [ ] Verify shadow live fills succeed on Coinbase after $100 top-up (breakout_crypto should clear)
 
 ## Kalshi Crypto Strategy Roadmap (KCS)
 - [x] KCS-02: Implied probability vs spot divergence (probability model + strategy)

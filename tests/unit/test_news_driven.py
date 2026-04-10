@@ -211,7 +211,7 @@ class TestStrategyConfig:
         s = NewsDrivenStrategy()
         assert s.parameters["price_move_threshold"] == 0.06
         assert s.parameters["volume_spike_mult"] == 2.5
-        assert s.parameters["min_volume"] == 100
+        assert s.parameters["min_volume"] == 50
         assert s.parameters["max_spread"] == 0.12
         assert s.parameters["position_size_usd"] == 500.0
         assert s.asset_class.value == "predictions"

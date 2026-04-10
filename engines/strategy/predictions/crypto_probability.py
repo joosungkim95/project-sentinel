@@ -66,8 +66,8 @@ class CryptoProbabilityStrategy(Strategy):
             parameters: Override default parameters (merged into defaults).
         """
         default_params: dict[str, Any] = {
-            "min_edge_pp": 8.0,         # Minimum edge in percentage points
-            "min_volume": 50,           # Minimum contracts traded
+            "min_edge_pp": 5.0,         # Minimum edge in percentage points (was 8.0)
+            "min_volume": 10,           # Minimum contracts traded (was 50)
             "max_spread": 0.05,         # Max yes bid-ask spread (dollars)
             "min_hours_to_expiry": 6,   # Don't trade < 6h to expiry
             "position_size_usd": 100.0,

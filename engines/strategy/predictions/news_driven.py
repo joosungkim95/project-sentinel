@@ -63,7 +63,7 @@ class NewsDrivenStrategy(Strategy):
             "volume_spike_mult": 2.5,      # Volume must be 2.5x average (was 3.0)
             "lookback": 5,                 # Bars for recent average
             "take_profit_pct": 0.5,        # Take profit at 50% of remaining
-            "min_volume": 100,             # Min absolute volume (was 200)
+            "min_volume": 50,              # Min absolute volume (was 100)
             "min_price": 0.15,             # Don't trade extremes
             "max_price": 0.85,
             "max_spread": 0.12,            # Slightly relaxed (was 0.10)
@@ -143,14 +143,21 @@ class NewsDrivenStrategy(Strategy):
         # Extract market data
         yes_price = market.get("yes_price") or market.get("yes_bid", 0)
         no_price = market.get("no_price") or market.get("no_bid", 0)
+        yes_ask = market.get("yes_ask", 0)
         volume = market.get("volume", 0)
         prev_price = market.get("prev_yes_close") or market.get("prev_price", 0)
         avg_volume = market.get("avg_daily_volume") or market.get("volume_avg", 0)
-        spread = market.get("spread", 1.0)
         ticker = market.get("ticker", "")
 
         if not yes_price or not ticker:
             return None
+
+        # Compute spread from bid/ask if not provided
+        spread = market.get("spread", 0)
+        if not spread and yes_ask > 0 and yes_price > 0:
+            spread = yes_ask - yes_price
+        elif not spread:
+            spread = 1.0
 
         # Price bounds filter
         if yes_price < self.parameters["min_price"] or yes_price > self.parameters["max_price"]:
@@ -164,9 +171,17 @@ class NewsDrivenStrategy(Strategy):
         if volume < self.parameters["min_volume"]:
             return None
 
-        # Detect price move
+        # Detect price move — use bid/ask midpoint vs bid as proxy when
+        # prev_price is unavailable (Kalshi doesn't provide historical
+        # snapshots in the markets endpoint).
         if prev_price > 0:
             price_move = yes_price - prev_price
+        elif yes_ask > 0 and yes_price > 0:
+            # Use the distance from midpoint to bid as a proxy for
+            # recent movement — wide divergence implies repricing
+            midpoint = (yes_price + yes_ask) / 2
+            implied_fair = 1.0 - (market.get("no_ask", 0) or 0.5)
+            price_move = implied_fair - midpoint
         else:
             return None
 
@@ -174,9 +189,15 @@ class NewsDrivenStrategy(Strategy):
         if move_magnitude < self.parameters["price_move_threshold"]:
             return None
 
-        # Detect volume spike
+        # Detect volume spike — if no avg_volume available (Kalshi doesn't
+        # provide it), treat high absolute volume as a proxy for activity.
+        # 500+ contracts signals meaningful activity even without a baseline.
         if avg_volume > 0:
             vol_ratio = volume / avg_volume
+        elif volume >= 500:
+            vol_ratio = 3.0  # High absolute volume stands on its own
+        elif volume >= 200:
+            vol_ratio = 2.0
         else:
             vol_ratio = 1.0
 

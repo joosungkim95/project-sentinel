@@ -328,7 +328,7 @@ class TestStrategyConfig:
         strategy = ValuePricingStrategy()
         assert strategy.strategy_id == "value_kalshi"
         assert strategy.asset_class == AssetClass.PREDICTIONS
-        assert strategy.parameters["min_edge"] == 0.05
+        assert strategy.parameters["min_edge"] == 0.03
         assert strategy.parameters["max_signals"] == 3
         assert strategy.tier == StrategyTier.CORE
         assert strategy.timeframe == "realtime"
@@ -342,7 +342,7 @@ class TestStrategyConfig:
         assert strategy.parameters["min_edge"] == 0.03
         assert strategy.parameters["max_signals"] == 5
         # Defaults preserved
-        assert strategy.parameters["min_volume"] == 100
+        assert strategy.parameters["min_volume"] == 20
 
     def test_position_sizing(self):
         """Position size should produce reasonable contract counts."""
@@ -375,8 +375,8 @@ class TestMarketSkimmer:
 
     def test_looser_params(self):
         skimmer = MarketSkimmerStrategy()
-        assert skimmer.parameters["min_edge"] == 0.03
-        assert skimmer.parameters["min_volume"] == 50
+        assert skimmer.parameters["min_edge"] == 0.02
+        assert skimmer.parameters["min_volume"] == 10
         assert skimmer.parameters["max_spread"] == 0.25
         assert skimmer.parameters["scan_limit"] == 100
 
@@ -386,8 +386,8 @@ class TestMarketSkimmer:
         core = ValuePricingStrategy()
         skimmer = MarketSkimmerStrategy()
 
-        # Market with small edge (0.04) — below CORE threshold
-        market = _market_with_yes_edge(edge=0.04)
+        # Market with small edge (0.025) — below CORE threshold (0.03)
+        market = _market_with_yes_edge(edge=0.025)
         core_opp = core._evaluate_market(market)
         skimmer_opp = skimmer._evaluate_market(market)
 

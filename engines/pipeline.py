@@ -322,7 +322,7 @@ class TradingPipeline:
 
                 # 2. Generate signals
                 signals = await strategy.generate_signals(
-                    market_data=market_data,
+                    bars=market_data,
                     market_regime=market_regime,
                 )
 

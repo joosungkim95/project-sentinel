@@ -63,7 +63,10 @@ def _make_bars(count: int = 750, base_price: float = 70000.0) -> list[dict]:
     return bars
 
 
-CLOSE_TIME = "2026-04-01T23:59:59Z"
+# Use a future date so hours_to_expiry is always positive in tests.
+# 3 days from now avoids min_hours_to_expiry filter.
+from datetime import datetime as _dt, timezone as _tz, timedelta as _td
+CLOSE_TIME = (_dt.now(tz=_tz.utc) + _td(days=3)).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 # --- Tests ---
@@ -165,15 +168,15 @@ class TestCryptoProbabilityStrategy:
 
     @pytest.mark.asyncio
     async def test_skips_illiquid_markets(self, strategy: CryptoProbabilityStrategy) -> None:
-        """Markets with low volume (10) are filtered out → no signal."""
+        """Markets with very low volume are filtered out → no signal."""
         market = _make_market(
             ticker="KXBTCD-26APR01-B60000",
             yes_ask=0.50,
             no_ask=0.51,
             yes_bid=0.48,
             no_bid=0.49,
-            volume=10,
-            open_interest=5,
+            volume=3,
+            open_interest=1,
             close_time=CLOSE_TIME,
             strike_price=60000.0,
         )

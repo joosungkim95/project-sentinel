@@ -77,8 +77,8 @@ class EventCatalystStrategy(Strategy):
         parameters: dict[str, Any] | None = None,
     ):
         default_params: dict[str, Any] = {
-            "min_edge_pp": 6.0,           # Lower than KCS-02 (event conviction)
-            "min_volume": 30,             # Lower volume OK pre-event
+            "min_edge_pp": 4.0,           # Lower than KCS-02 (event conviction, was 6.0)
+            "min_volume": 10,             # Lower volume OK pre-event (was 30)
             "max_spread": 0.06,           # Slightly wider spread OK
             "min_hours_to_expiry": 12,    # Don't trade < 12h to expiry
             "max_hours_to_expiry": 168,   # Don't trade > 7 days out

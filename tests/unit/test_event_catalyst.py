@@ -73,7 +73,7 @@ class TestEventCatalystStrategy:
         assert s.strategy_id == "event_catalyst_prob_kalshi"
         assert s.tier.value == "sniper"
         assert s.timeframe == "realtime"
-        assert s.parameters["min_edge_pp"] == 6.0
+        assert s.parameters["min_edge_pp"] == 4.0
         assert s.parameters["lookahead_days"] == 5
 
     def test_custom_params(self) -> None:

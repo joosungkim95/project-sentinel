@@ -118,8 +118,24 @@ class PositionManager:
         self, trade: TradeRecord,
     ) -> dict[str, Any] | None:
         """Check exit conditions for a single open trade."""
+        # Max hold time — checked first because it doesn't need a live price.
+        # If the position has been open too long, close it regardless.
+        if trade.entry_time:
+            hold_duration = datetime.now(timezone.utc) - trade.entry_time
+            if hold_duration > timedelta(hours=self.max_hold_hours):
+                exit_price = await self._get_current_price(trade) or trade.price
+                return await self._close_position(
+                    trade, exit_price,
+                    f"max_hold: held {hold_duration.total_seconds() / 3600:.0f}h"
+                    f" > {self.max_hold_hours}h limit",
+                )
+
         current_price = await self._get_current_price(trade)
         if current_price is None:
+            logger.debug(
+                "Cannot check stop/TP for %s %s — no live price available",
+                trade.strategy_id, trade.symbol,
+            )
             return None
 
         entry_price = trade.price
@@ -139,16 +155,6 @@ class PositionManager:
                 trade, current_price,
                 f"take_profit: price {current_price:.2f} >= target {tp_price:.2f}",
             )
-
-        # Max hold time
-        if trade.entry_time:
-            hold_duration = datetime.now(timezone.utc) - trade.entry_time
-            if hold_duration > timedelta(hours=self.max_hold_hours):
-                return await self._close_position(
-                    trade, current_price,
-                    f"max_hold: held {hold_duration.total_seconds() / 3600:.0f}h"
-                    f" > {self.max_hold_hours}h limit",
-                )
 
         return None
 

@@ -60,9 +60,9 @@ class ValuePricingStrategy(Strategy):
     ):
         default_params = {
             "symbol": "",  # Dynamic — strategy picks markets
-            "min_edge": 0.05,          # Min edge (dollars) to trigger signal
-            "min_volume": 100,         # Min contracts traded
-            "min_open_interest": 50,   # Min open interest
+            "min_edge": 0.03,          # Min edge (dollars) to trigger signal (was 0.05)
+            "min_volume": 20,          # Min contracts traded (was 100)
+            "min_open_interest": 10,   # Min open interest (was 50)
             "min_price": 0.10,         # Don't trade sub-10-cent contracts
             "max_price": 0.90,         # Don't trade near-certainties
             "max_spread": 0.15,        # Skip illiquid wide-spread markets
@@ -391,9 +391,9 @@ class MarketSkimmerStrategy(ValuePricingStrategy):
     ):
         scout_params = {
             "symbol": "",
-            "min_edge": 0.03,          # Looser: was 0.05
-            "min_volume": 50,          # Looser: was 100
-            "min_open_interest": 25,   # Proportional to volume change
+            "min_edge": 0.02,          # Looser: was 0.03
+            "min_volume": 10,          # Looser: was 50
+            "min_open_interest": 5,    # Looser: was 25
             "min_price": 0.10,
             "max_price": 0.90,
             "max_spread": 0.25,        # Looser: was 0.15
