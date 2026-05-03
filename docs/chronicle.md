@@ -207,6 +207,39 @@ A running narrative of building a personal autonomous trading platform with Clau
 
 ---
 
+## Phase 11: Five Silent Failures and the Hobby Plan Ambush (May 3, 2026)
+
+**The setup:** Three weeks unattended. Jay opened the session expecting "let's review what the system did." First curl returned `404 Application not found` from Railway with a `x-railway-fallback: true` header — the production deploy was simply gone, with no error, no email, no alert. Cause: the Railway free trial expired silently around April 22 and de-routed the URL. Jay signed up for Hobby, build came back, and *then* the real archaeology began: the system had been broken in five separate ways, four of which were invisible until the production app was alive again to expose them.
+
+**Failure #1 — Kalshi DNS typo, 32 days dead.** `KALSHI_BASE_URL` had been set to `https://trading-api.kalshi.co`. The correct prod TLD was `.com`; `.co` is the demo's TLD. The hostname returned NXDOMAIN, the adapter raised at startup, the registration code logged `"Kalshi adapter failed to connect — not registered"` at WARNING level — and that single line had been scrolling in the logs since April 4 with nobody watching. All five prediction strategies had been silently no-op'd for 32 days because the API client never even instantiated.
+
+**Failure #2 — Coinbase 350-candle hard limit.** Every 15 minutes since at least Apr 22, Coinbase had been returning `HTTP 400: number of candles requested should be less than 350`. The 4h-aggregation path in `pipeline.py` multiplies `DEFAULT_BARS_LIMIT (100) × factor (4) = 400` 1h candles to compose 100 4h bars. Coinbase had either tightened the limit during our downtime or always enforced it — either way, `trend_crypto` (the only 4h-timeframe crypto strategy) had been silently getting `[]` from the adapter and producing nothing. Fix was a one-line clamp at the adapter boundary: `limit = min(limit, 349)`. The arithmetic of the bug is constant whether we're online for 1 day or 100 — billing being off didn't cause it, it just hid the symptoms.
+
+**Failure #3 — Kalshi creds were the demo set.** Once the DNS fix landed, Kalshi returned `401 Unauthorized` on `/portfolio/balance`. The keys in Railway were demo-environment keys that had been sitting there since before the Apr 4 "switch to live" — a switch that never actually reached Kalshi (because of the URL typo). Jay generated fresh prod keys; we saved them to a new gitignored `.env.prod` file (with a `.gitignore` tightening to cover `.env.*` going forward). Verified the creds against the prod URL with a one-shot Python probe: still 401.
+
+**Failure #4 — Kalshi's entire prod API has moved.** The 401 with the new prod creds wasn't an auth failure at all. The response body read:
+
+> `API has been moved to https://api.elections.kalshi.com/ Please check our docs on how to migrate.`
+
+Both authenticated AND public endpoints on `trading-api.kalshi.com` returned this exact string with HTTP 401. Kalshi had migrated their entire API to a new domain (presumably alongside their reorganization around election markets) and chose to communicate this via a misleading 401 status code on a dead host. Updated the env var. Local probe finally got a 200 back: `{"balance": 1000, "portfolio_value": 0}`. $10.00 funded.
+
+**Failure #5 — Kalshi's response schema also changed.** With the new URL working, predictions cycles ran but every single market was still being skipped. KCS-02 reported `{missing_fields: 50}` (100% of scanned markets) and value/skimmer reported `{low_volume: 50}` (100%). The bytes were arriving from Kalshi correctly — the adapter was reading the wrong field names. Old API: `yes_bid` (cents int), `volume` (int), `strike_price`. New API: `yes_bid_dollars` (string `"0.8400"`), `volume_fp` (string `"0.00"`), `floor_strike` (number). Every numeric field was silently falling through to `0`, which made every market look thin AND missing-strike. A `_to_float` helper plus six field renames across `get_quote`, `get_markets`, and `get_crypto_markets` — verified end-to-end with a local probe before pushing. After deploy: KCS-02's skip breakdown went from `{missing_fields: 50}` to `{low_volume: 48, missing_fields: 1, no_edge: 1}`. The remaining `low_volume` is real — election markets are genuinely thin per-contract — and `missing_fields: 1` is an outlier ticker (`KXBTC-...-T68250`) that has no `floor_strike` for unclear reasons.
+
+**The Polymarket detour.** Mid-session Jay asked about adding Polymarket back into Sentinel — Polymarket relaunched in the US in December 2025 via the QCX acquisition, and is now a CFTC-regulated DCM. NY isn't in the prohibited-states list (AZ, IL, MA, MD, MI, MT, NJ, NV, OH are). Started brainstorming the integration. The keys Jay had matched the international/legacy CLOB shape (UUID apiKey + `0x`-prefixed Polygon wallet private key) — but the international path is wallet-based and gray-zone for NY residents. Confirmed Jay is on the waitlist for the US-regulated path. Paused the work cleanly, saved his international keys to `.env.prod` with explicit "INCOMPLETE — won't be used" notation, captured the architectural finding in TODO.md.
+
+**The architectural finding worth remembering:** While exploring how a second prediction-market adapter would integrate, found that `Executor.register_adapter` (`engines/execution/base.py:112-114`) keys adapters by `AssetClass` only. Adding Polymarket as a second `PREDICTIONS` adapter would silently overwrite Kalshi. The Phase-1 Polymarket build will need a multi-adapter routing fix (`(asset_class, platform_name)` keying + a `platform` field on Signal so strategies can target a specific venue) before it can land — captured in TODO so the next session doesn't have to rediscover it.
+
+**The shape of the day:** Failure #1 revealed Failure #3, which revealed Failure #4, which revealed Failure #5. Each fix unblocked the *next* layer of the broken pipeline. The 4-bug audit on April 10 was at least four parallel bugs that we could see all at once; this session was a serial chain where each fix was a prerequisite for finding the next problem.
+
+**Lessons from this phase:**
+- **Silent failures cluster.** Five separate bugs had been hiding in the system, but the trial outage made them visible all at once because the restart forced reauthentication / refetching / reparsing across every code path. Long uptime is bad for observability; restarts surface latent breakage.
+- **Misleading status codes from upstream APIs are particularly dangerous.** Kalshi returning 401 to mean "we moved" cost us hours of credential-debugging suspicion. The failure message in the body told us instantly — but we wouldn't have seen it without dropping into a Python probe to dump the response.
+- **Field-name drift in third-party APIs is silent and total.** The schema change wouldn't have caused any test to fail (we mock with our own payloads). The strategies didn't crash; they just saw zeros everywhere and decided nothing was actionable. Worth running an integration test against the real upstream periodically — not just unit tests against our own mocks.
+- **Hobby plan billing alerts are mandatory infrastructure, not nice-to-have.** Open item in TODO.md to set up Railway usage alerts so this can't recur silently.
+- **"Demo → live" is one of the most error-prone transitions in trading systems.** Three of today's five failures (#1, #3, #4) all trace back to the original demo→live attempt on April 4: typo in URL, demo creds left in place, and an underlying API migration on the live side that we didn't know about. The "switch to live" was treated as a one-line config change; it's actually a verification campaign.
+
+---
+
 ## Running Themes
 
 - **Cost obsession:** Everything is designed to stay under $30/mo. Haiku for routine calls, Sonnet only for strategy generation, prompt caching, no Kubernetes.

@@ -3,15 +3,15 @@
 > **This file is the single source of truth for remote Claude sessions (dispatch/cowork).**
 > It mirrors the local memory system. Updated at the end of every session.
 >
-> Last updated: 2026-04-10
+> Last updated: 2026-05-03
 
 ---
 
 ## About Jay (User)
 
-Jay is building Sentinel as a personal project. Experienced developer comfortable with Python, FastAPI, SQLAlchemy, Docker. Building across US equities (Alpaca), crypto (Coinbase), and prediction markets (Kalshi only).
+Jay is building Sentinel as a personal project. Experienced developer comfortable with Python, FastAPI, SQLAlchemy, Docker. Building across US equities (Alpaca), crypto (Coinbase), and prediction markets (Kalshi today; Polymarket once US-regulated invite arrives).
 
-- Based in New York — cannot use Polymarket (NY residents restricted). Kalshi is the only prediction market platform.
+- Based in New York. Polymarket relaunched in the US Dec 2025 (CFTC-regulated DCM via QCX acquisition); Jay is on the waitlist for the US-regulated path. International polymarket.com works but is the legality-gray-area path for NY residents — not used.
 - Uses Claude Desktop for research/brainstorming and Claude Code for implementation
 - Prefers getting things done over extended discussion — "let's go for it" when direction is clear
 - Comfortable with risk management concepts (Kelly criterion, ATR stops, tier-based budgets)
@@ -35,7 +35,26 @@ Jay is building Sentinel as a personal project. Experienced developer comfortabl
 - **Railway project:** https://railway.com/project/f440a704-9375-4faf-9a3b-2e614980c437
 - **Services:** sentinel (app), Postgres (DATABASE_URL linked), Redis (REDIS_URL linked)
 
-**Current state (2026-04-10):**
+**Current state (2026-05-03):**
+- Now on Railway **Hobby plan** (paid). The free trial expired silently around Apr 22 and took prod offline (404 with `x-railway-fallback: true` header) — no proactive notification. Set up usage alerts / spend cap to prevent recurrence (TODO).
+- **Coinbase candle clamp** — `engines/execution/coinbase.py` now clamps any candle request to 349 bars at the adapter boundary. Coinbase rejects ≥350 candles per call; the 4h-aggregation path in `pipeline.py` was multiplying `DEFAULT_BARS_LIMIT (100) × factor (4) = 400` and silently getting empty bars back. This had been killing `trend_crypto` (the only 4h crypto strategy) — verified zero candle errors on the new container post-deploy.
+- **Kalshi prod URL migrated** — `KALSHI_BASE_URL` was a `.kalshi.co` typo (NXDOMAIN, demo's TLD) since Apr 4 — adapter silently failed to register at startup, all 5 prediction strategies dead for ~32 days. Then once we fixed `.co`→`.com`, Kalshi returned 401 with body "API has been moved to https://api.elections.kalshi.com/" on every endpoint (auth + public). Final URL: `https://api.elections.kalshi.com`. Old `trading-api.kalshi.com` is a dead cliff.
+- **Kalshi creds upgraded to prod** — old keys were demo-environment creds masked by the URL typo. New prod keys (API key `d1663e00-...` + RSA private key) saved to **gitignored `.env.prod`** as local backup. `.gitignore` tightened to cover `.env.*` (with `!.env.example` exception). `KALSHI_OBSERVE_ONLY=TRUE` still set — no real orders, just live data.
+- **Kalshi adapter schema migration** — Kalshi's API now returns `yes_bid_dollars` (string), `volume_fp` (string), `floor_strike` (number), etc. — old `yes_bid` (cents int), `volume` (int), `strike_price` keys are gone. `engines/execution/kalshi.py` updated with a `_to_float` helper across `get_quote`, `get_markets`, `get_crypto_markets`. KCS-02's "100% missing_fields" skip now drops to ~2%; remaining skips are real `low_volume` (election markets are thin) or `no_edge`.
+- **Pipeline now alive end-to-end** — first crypto cycle on the new container ran clean; first predictions cycle ran clean; all three core/scout prediction strategies (KCS-02, value_kalshi, skimmer_kalshi) report real `{low_volume, no_edge}` breakdowns instead of `{missing_fields: ALL}`.
+- **All 405 tests passing** post-Kalshi-schema-update. Updated test fixture in `tests/unit/test_kalshi_adapter.py` to use new field names.
+- **Polymarket scoped, paused.** International API (CLOB, wallet-based, polymarket.com) doesn't fit the NY legality story. US-regulated path (post-Dec-2025 QCX relaunch) is the target — Jay on waitlist. Architectural finding noted: `Executor.register_adapter` keys by `asset_class`, so adding Polymarket as a second `PREDICTIONS` adapter would silently overwrite Kalshi; needs a multi-adapter routing fix before Phase 1 lands. See `TODO.md` "Polymarket (paused)" section.
+
+**Open observability gaps (next session):**
+- Shadow executor discards live `TradeResult` after counter increment (in-memory, no DB persistence). Coinbase account history confirmed zero real fills Apr 10–22 — can't audit from our DB. Needs persistence fix.
+- `/portfolio` returns "no portfolio snapshots yet" — snapshot persistence may be broken or never ran. Needs diagnostic.
+- Health monitor reports `kalshi: healthy` even when adapter failed to register at startup (initial-state bug, not live state).
+
+**Equity strategies still TBD** — 0 trades across 7 strategies in 22 days pre-trial-expiry. Couldn't diagnose Sunday 5/3 (markets closed). Reproduce on Monday 5/4 market open.
+
+---
+
+**Prior current state (2026-04-10) — kept for context:**
 - 15 tiered strategies active (v5): 4 scouts, 7 core, 4 snipers
 - Confidence gates: scout 0.2, core 0.4, sniper 0.7
 - Market regime classifier: SMA slope + ATR ratio
@@ -77,7 +96,7 @@ Jay is building Sentinel as a personal project. Experienced developer comfortabl
 | Alpaca | Connected on Railway | Paper trading | `ALPACA_BASE_URL=https://paper-api.alpaca.markets` |
 | Coinbase | Connected on Railway | Real money (shadow min-size ~$10) | COINBASE_API_SECRET PEM added via Railway Variables |
 | Kalshi | Connected on Railway | Live (observe-only) | `KALSHI_BASE_URL=https://api.elections.kalshi.com` (migrated from `trading-api.kalshi.com` 2026-05-03 — old domain returns 401 with migration notice), `KALSHI_OBSERVE_ONLY=true` |
-| Polymarket | Blocked | N/A | US trading restricted |
+| Polymarket | Waitlisted for US (regulated) | N/A | Polymarket US (QCX/CFTC-regulated) relaunched Dec 2025; Jay on waitlist. International polymarket.com works (CLOB + wallet) but legality-gray for NY — not used. Will need multi-adapter routing fix in `Executor` before integrating (would overwrite Kalshi as the `PREDICTIONS` adapter). |
 
 **Shadow mode:** All trades execute at minimum size (1 share / 0.00012 BTC / 1 contract) on real platforms, full-size paper simulations tracked in parallel.
 
@@ -133,11 +152,17 @@ Jay is building Sentinel as a personal project. Experienced developer comfortabl
 
 ## Post-Deploy Review Checklist
 
-Four-bug fix deployed 2026-04-10. Review after next few cycles:
+Resolved from the 2026-04-10 deploy — kept for historical context:
+- ✅ **Stuck positions closed.** All Apr 2 vol_harvest BTC entries (~$87,609 entry, 20+ rows) and Mar 31 vol_harvest ETH entries ($3,007.69 entry) have `pnl` populated → closed via max_hold_time. Realized losses (~$140 per BTC, ~$187 per ETH) since they sat through the late-March/early-April crypto downtrend.
+- ❌ **Shadow live fills NOT working** (Apr 10 fix didn't land). Coinbase account history shows zero real fills Apr 10–22. The shadow executor discards live `TradeResult` after counter increment, so we couldn't see this from our DB — confirmed via Jay's Coinbase account directly. Open item: persist live results.
+- ✅/❌ **Prediction strategies firing — partially.** Adapter URL/creds/schema all fixed 2026-05-03. KCS-02 etc. now run clean cycles, but produce zero signals because election markets are genuinely thin (`low_volume` on 95%+ of scanned markets) and the few that pass volume thresholds fail `no_edge`. Signal flow is healthy; market characteristics are the bottleneck.
+- ⚠️ **KCS-05 catalyst window for CPI Apr 14 was missed** — Kalshi adapter was offline due to the URL typo, so the 5-day pre-positioning window had no working pipeline. Next macro catalyst: FOMC May 6.
+- ✅ **Vol harvest trend filter holding** (no signals fired in high_volatility regime through Apr 22).
+- 🔍 **Sniper cooldown enforcement** — still untested; vol_harvest hasn't fired since Apr 22 (regime + trial outage).
 
-1. **Stuck positions closing?** — 20 vol_harvest BTC-USD positions opened Apr 2 at $87,609 should auto-close via max_hold_time (7d) on the next sniper_crypto cycle (runs hourly). Check /trades — these should move from open to closed with pnl populated. Discord will alert with batched exit summary.
-2. **Shadow live fills working?** — Coinbase now has $100 USD (converted from USDC). Next breakout_crypto or any crypto signal should produce a successful live fill at ~$11 symbol-aware min size. Check /shadow — `live_executed` should increment, `fill_rate_match` should rise above 0.
-3. **Prediction strategies firing?** — Lowered thresholds across all 5 prediction strategies. Check Railway logs for WARNING-level skip reasons (should see fewer low_volume/low_oi/no_edge skips) and /trades for any prediction-asset-class trades. news_driven should now work on live Kalshi data (fallback logic handles missing prev_price/avg_volume).
-4. **KCS-05 catalyst window?** — CPI Apr 14 is 4 days out (Apr 10). 5-day pre-positioning window opened Apr 9. Should start generating event_catalyst signals with the lowered 4pp edge threshold.
-5. **Vol harvest trend filter holding?** — Confirmed working Apr 5: 0 BUY signals in high_volatility regime. Should stay quiet until regime shifts to ranging/trending_up.
-6. **Cooldown enforcement?** — Sniper 24h DB-backed cooldown deployed Apr 5. Testable when a new vol_harvest signal finally fires post-regime-shift.
+Next live-state checks (post 2026-05-03 deploy):
+1. **Equity strategies on Monday 5/4 market open** — 0 trades across 7 equity strategies for 22 days pre-trial. Need market-hours data to diagnose whether it's data-fetch, signal-gen, or risk-rejection.
+2. **Predictions volume reality** — confirm whether persistent `low_volume` is genuine market thinness (don't lower threshold) or a calibration miss (should lower).
+3. **Kalshi 429 rate limiting** — value/skimmer per-market quote enrichment is hitting Kalshi's rate limit. Either batch via `/markets?tickers=` or add throttle.
+4. **Shadow live fill observability fix** — persist live `TradeResult` so we can audit real Coinbase fill activity.
+5. **Portfolio snapshots persistence** — `/portfolio` returns "no snapshots yet"; diagnose whether snapshot persistence is broken or never ran.

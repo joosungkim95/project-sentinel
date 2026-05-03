@@ -116,6 +116,12 @@
 - [ ] Kalshi 429 rate limiting: value/skimmer strategies fetch per-market quote one-by-one; either batch via `/markets?tickers=` or throttle
 - [ ] Kalshi `low_volume` skips: 100% of value/skimmer markets fail volume threshold — confirm whether this is real (election markets are thin) or a calibration issue
 
+## Polymarket (paused 2026-05-03)
+- [ ] **Blocker:** Jay is on the waitlist for Polymarket US (CFTC-regulated). The international polymarket.com path is wallet-based + legality-gray-area for NY, so we're waiting for the US-regulated invite before building the adapter.
+- [ ] When invite lands: re-research Polymarket US API (it's likely different from the international CLOB docs at docs.polymarket.com — the wallet-based auth probably doesn't apply on the regulated path).
+- [ ] **Architectural prerequisite:** `Executor.register_adapter` (`engines/execution/base.py:112-114`) keys adapters by `asset_class`, so adding Polymarket as a second `PREDICTIONS` adapter would silently overwrite Kalshi. Need a multi-adapter routing fix (likely `(asset_class, platform_name)` key + `platform` field on Signal). Solve before landing Phase 1.
+- [ ] Phase 1 scope (when ready): standalone Polymarket adapter + `polymarket_value_pricing` strategy mirroring `value_kalshi`. Phase 2 (cross-venue divergence/arb) is a separate spec on top.
+
 ## Kalshi Crypto Strategy Roadmap (KCS)
 - [x] KCS-02: Implied probability vs spot divergence (probability model + strategy)
 - [x] Macro catalyst calendar (FOMC, CPI, NFP dates for 2026)
