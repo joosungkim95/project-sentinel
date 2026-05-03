@@ -76,12 +76,12 @@ Jay is building Sentinel as a personal project. Experienced developer comfortabl
 |----------|--------|------|-------|
 | Alpaca | Connected on Railway | Paper trading | `ALPACA_BASE_URL=https://paper-api.alpaca.markets` |
 | Coinbase | Connected on Railway | Real money (shadow min-size ~$10) | COINBASE_API_SECRET PEM added via Railway Variables |
-| Kalshi | Connected on Railway | Live (observe-only) | `KALSHI_BASE_URL=https://trading-api.kalshi.com`, `KALSHI_OBSERVE_ONLY=true` (switched from demo Apr 4) |
+| Kalshi | Connected on Railway | Live (observe-only) | `KALSHI_BASE_URL=https://api.elections.kalshi.com` (migrated from `trading-api.kalshi.com` 2026-05-03 — old domain returns 401 with migration notice), `KALSHI_OBSERVE_ONLY=true` |
 | Polymarket | Blocked | N/A | US trading restricted |
 
 **Shadow mode:** All trades execute at minimum size (1 share / 0.00012 BTC / 1 contract) on real platforms, full-size paper simulations tracked in parallel.
 
-**To switch to live:** Alpaca → change ALPACA_BASE_URL to `https://api.alpaca.markets`. Kalshi → change KALSHI_BASE_URL to `https://trading-api.kalshi.com`. Only after 2+ weeks clean shadow mode.
+**To switch to live:** Alpaca → change ALPACA_BASE_URL to `https://api.alpaca.markets`. Kalshi → change KALSHI_BASE_URL to `https://api.elections.kalshi.com`. Only after 2+ weeks clean shadow mode.
 
 ---
 
