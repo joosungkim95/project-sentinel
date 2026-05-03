@@ -81,7 +81,7 @@ Jay is building Sentinel as a personal project. Experienced developer comfortabl
 
 **Shadow mode:** All trades execute at minimum size (1 share / 0.00012 BTC / 1 contract) on real platforms, full-size paper simulations tracked in parallel.
 
-**To switch to live:** Alpaca → change ALPACA_BASE_URL to `https://api.alpaca.markets`. Kalshi → change KALSHI_BASE_URL to `https://trading-api.kalshi.co`. Only after 2+ weeks clean shadow mode.
+**To switch to live:** Alpaca → change ALPACA_BASE_URL to `https://api.alpaca.markets`. Kalshi → change KALSHI_BASE_URL to `https://trading-api.kalshi.com`. Only after 2+ weeks clean shadow mode.
 
 ---
 

@@ -100,8 +100,16 @@
 - [x] Fix run_cycle parameter mismatch (market_data= → bars=) — dead code but correct now
 - [x] Lower prediction strategy thresholds (min_volume, min_edge) across value_pricing, market_skimmer, news_driven, KCS-02, KCS-05
 - [x] news_driven fallback — uses yes_ask/no_ask midpoint vs implied fair when Kalshi doesn't provide prev_price/avg_volume
-- [ ] Verify 20 stuck vol_harvest BTC positions auto-close on next cycle after deploy
-- [ ] Verify shadow live fills succeed on Coinbase after $100 top-up (breakout_crypto should clear)
+- [x] Verify 20 stuck vol_harvest BTC positions auto-close on next cycle after deploy (confirmed: all Apr 2 BTC + Mar 31 ETH entries have pnl populated → closed)
+- [ ] Verify shadow live fills succeed on Coinbase after $100 top-up (breakout_crypto should clear) — **FAILED**: Coinbase account shows zero real fills Apr 10-22
+
+## Discovered 2026-05-03 (post-trial-expiry triage)
+- [x] Fix Kalshi URL typo (`.kalshi.co` → `.kalshi.com`) — DNS NXDOMAIN was causing adapter to fail at startup, all 5 prediction strategies silent for 22 days
+- [x] Clamp Coinbase candle requests to 349 (API rejects ≥350) — was causing trend_crypto (4h aggregated, 100*4=400 candles) to silently get empty bars and produce zero signals
+- [ ] Investigate equity strategy silence — 7 strategies, 0 trades in 22 days, pending Monday market open to reproduce
+- [ ] Fix shadow executor live-fill observability — live `TradeResult` is currently discarded after counter increment; persist to DB or Redis so we can audit whether real Coinbase orders fire
+- [ ] Diagnose portfolio_snapshots persistence — `/portfolio` returns "no snapshots yet"
+- [ ] Set Railway usage alerts / spend cap to prevent silent trial / billing suspension
 
 ## Kalshi Crypto Strategy Roadmap (KCS)
 - [x] KCS-02: Implied probability vs spot divergence (probability model + strategy)

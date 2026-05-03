@@ -266,6 +266,8 @@ class CoinbaseAdapter:
                 "ONE_DAY": 86400,
             }
             seconds = granularity_seconds.get(granularity, 86400)
+            # Coinbase rejects requests for >=350 candles per call.
+            limit = min(limit, 349)
             start = now - (limit * seconds)
 
             candles = self._client.get_candles(
