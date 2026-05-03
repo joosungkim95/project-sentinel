@@ -25,12 +25,12 @@ async def test_get_crypto_markets_passes_series_ticker(adapter):
         "markets": [{
             "ticker": "KXBTCD-26MAR28-B70000",
             "title": "Will Bitcoin be above $70,000 on March 28?",
-            "yes_bid": 55, "no_bid": 44,
-            "yes_ask": 56, "no_ask": 45,
-            "volume": 500, "open_interest": 200,
+            "yes_bid_dollars": "0.5500", "no_bid_dollars": "0.4400",
+            "yes_ask_dollars": "0.5600", "no_ask_dollars": "0.4500",
+            "volume_fp": "500.00", "open_interest_fp": "200.00",
             "status": "open",
             "close_time": "2026-03-28T23:59:59Z",
-            "strike_price": 70000,
+            "floor_strike": 70000,
         }]
     }
     adapter._get = AsyncMock(return_value=mock_response)
@@ -40,7 +40,7 @@ async def test_get_crypto_markets_passes_series_ticker(adapter):
     assert len(markets) == 1
     m = markets[0]
     assert m["ticker"] == "KXBTCD-26MAR28-B70000"
-    assert m["yes_ask"] == 0.56  # cents to dollars
+    assert m["yes_ask"] == 0.56
     assert m["no_ask"] == 0.45
     assert m["yes_bid"] == 0.55
     assert m["no_bid"] == 0.44

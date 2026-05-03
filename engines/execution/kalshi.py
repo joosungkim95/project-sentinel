@@ -29,6 +29,16 @@ from engines.models import (
 logger = logging.getLogger(__name__)
 
 
+def _to_float(value: Any) -> float:
+    """Coerce Kalshi's stringified numeric fields (e.g. "0.8400") to float."""
+    if value is None:
+        return 0.0
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return 0.0
+
+
 class KalshiAdapter:
     """
     Kalshi prediction market adapter.
@@ -190,12 +200,12 @@ class KalshiAdapter:
             return {
                 "ticker": market.get("ticker"),
                 "title": market.get("title"),
-                "yes_price": market.get("yes_bid", 0) / 100,
-                "no_price": market.get("no_bid", 0) / 100,
-                "yes_ask": market.get("yes_ask", 0) / 100,
-                "no_ask": market.get("no_ask", 0) / 100,
-                "volume": market.get("volume", 0),
-                "open_interest": market.get("open_interest", 0),
+                "yes_price": _to_float(market.get("yes_bid_dollars")),
+                "no_price": _to_float(market.get("no_bid_dollars")),
+                "yes_ask": _to_float(market.get("yes_ask_dollars")),
+                "no_ask": _to_float(market.get("no_ask_dollars")),
+                "volume": _to_float(market.get("volume_fp")),
+                "open_interest": _to_float(market.get("open_interest_fp")),
                 "status": market.get("status"),
             }
         except Exception as e:
@@ -250,12 +260,12 @@ class KalshiAdapter:
                 {
                     "ticker": m.get("ticker"),
                     "title": m.get("title"),
-                    "yes_bid": m.get("yes_bid", 0) / 100,
-                    "no_bid": m.get("no_bid", 0) / 100,
-                    "yes_ask": m.get("yes_ask", 0) / 100,
-                    "no_ask": m.get("no_ask", 0) / 100,
-                    "volume": m.get("volume", 0),
-                    "open_interest": m.get("open_interest", 0),
+                    "yes_bid": _to_float(m.get("yes_bid_dollars")),
+                    "no_bid": _to_float(m.get("no_bid_dollars")),
+                    "yes_ask": _to_float(m.get("yes_ask_dollars")),
+                    "no_ask": _to_float(m.get("no_ask_dollars")),
+                    "volume": _to_float(m.get("volume_fp")),
+                    "open_interest": _to_float(m.get("open_interest_fp")),
                     "status": m.get("status"),
                 }
                 for m in data.get("markets", [])
@@ -289,15 +299,16 @@ class KalshiAdapter:
                 {
                     "ticker": m.get("ticker"),
                     "title": m.get("title"),
-                    "yes_bid": m.get("yes_bid", 0) / 100,
-                    "no_bid": m.get("no_bid", 0) / 100,
-                    "yes_ask": m.get("yes_ask", 0) / 100,
-                    "no_ask": m.get("no_ask", 0) / 100,
-                    "volume": m.get("volume", 0),
-                    "open_interest": m.get("open_interest", 0),
+                    "yes_bid": _to_float(m.get("yes_bid_dollars")),
+                    "no_bid": _to_float(m.get("no_bid_dollars")),
+                    "yes_ask": _to_float(m.get("yes_ask_dollars")),
+                    "no_ask": _to_float(m.get("no_ask_dollars")),
+                    "volume": _to_float(m.get("volume_fp")),
+                    "open_interest": _to_float(m.get("open_interest_fp")),
                     "status": m.get("status"),
                     "close_time": m.get("close_time"),
-                    "strike_price": m.get("strike_price"),
+                    # New API: floor_strike is the threshold for "greater"/"less" binary markets.
+                    "strike_price": m.get("floor_strike"),
                 }
                 for m in data.get("markets", [])
             ]

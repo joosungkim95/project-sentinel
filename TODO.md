@@ -106,10 +106,15 @@
 ## Discovered 2026-05-03 (post-trial-expiry triage)
 - [x] Fix Kalshi URL typo (`.kalshi.co` → `.kalshi.com`) — DNS NXDOMAIN was causing adapter to fail at startup, all 5 prediction strategies silent for 22 days
 - [x] Clamp Coinbase candle requests to 349 (API rejects ≥350) — was causing trend_crypto (4h aggregated, 100*4=400 candles) to silently get empty bars and produce zero signals
+- [x] Migrate Kalshi prod URL to `api.elections.kalshi.com` — old `trading-api.kalshi.com` returns 401 with migration notice on every endpoint (auth + public)
+- [x] Replace demo Kalshi creds with prod creds (stored in gitignored `.env.prod`); tighten `.gitignore` to cover `.env.*`
+- [x] Update Kalshi adapter for new API schema — dollar strings (`yes_bid_dollars`), float-precision strings (`volume_fp`, `open_interest_fp`), and `floor_strike` instead of `strike_price`. All three reader methods (get_quote, get_markets, get_crypto_markets) updated.
 - [ ] Investigate equity strategy silence — 7 strategies, 0 trades in 22 days, pending Monday market open to reproduce
 - [ ] Fix shadow executor live-fill observability — live `TradeResult` is currently discarded after counter increment; persist to DB or Redis so we can audit whether real Coinbase orders fire
 - [ ] Diagnose portfolio_snapshots persistence — `/portfolio` returns "no snapshots yet"
 - [ ] Set Railway usage alerts / spend cap to prevent silent trial / billing suspension
+- [ ] Kalshi 429 rate limiting: value/skimmer strategies fetch per-market quote one-by-one; either batch via `/markets?tickers=` or throttle
+- [ ] Kalshi `low_volume` skips: 100% of value/skimmer markets fail volume threshold — confirm whether this is real (election markets are thin) or a calibration issue
 
 ## Kalshi Crypto Strategy Roadmap (KCS)
 - [x] KCS-02: Implied probability vs spot divergence (probability model + strategy)
