@@ -176,8 +176,18 @@ class ShadowExecutor:
 
         if live_result.executed:
             self.stats.live_executed += 1
+            logger.info(
+                "Shadow live OK: %s %s on %s (fill_price=%s qty=%s)",
+                signal.side.value, signal.symbol, live_result.platform,
+                live_result.fill_price, live_result.fill_quantity,
+            )
         else:
             self.stats.live_failed += 1
+            logger.warning(
+                "Shadow live FAILED: %s %s asset=%s platform=%s error=%r",
+                signal.side.value, signal.symbol, signal.asset_class.value,
+                live_result.platform, live_result.error_message,
+            )
 
         # 3. Compare and detect divergence
         await self._check_divergence(signal, paper_result, live_result)
