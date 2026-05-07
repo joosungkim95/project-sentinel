@@ -1,5 +1,12 @@
 # TODO.md — Sentinel Development Tracker
 
+## Next Session Focus (2026-05-07)
+- [ ] **Wire Alpaca live account alongside paper.** Requires `Executor.register_adapter` multi-adapter routing fix (currently keys by `AssetClass` only — a second `EQUITIES` adapter would silently overwrite paper). Likely change: `(asset_class, platform_name)` keying + `platform` field on `Signal` for routing. Same fix would unblock Polymarket; **leave Polymarket alone** (still waitlisted in US).
+- [ ] **Diagnose Bug #6** with the new `Shadow live OK / FAILED` log lines from commit b516248 — first non-cooldown signal will reveal the failure path.
+- [ ] **Verify equity signals on Thursday 5/7 market open** — first market open with the alpaca.py `TimeFrame` + `feed="iex"` fixes.
+
+---
+
 ## Current Sprint: Phase 2 — Multi-Platform & Strategies
 
 ### Priority 1: Foundation

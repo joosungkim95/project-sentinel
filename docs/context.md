@@ -55,6 +55,11 @@ Jay is building Sentinel as a personal project. Experienced developer comfortabl
 - Health monitor reports `kalshi: healthy` even when adapter failed to register at startup (initial-state bug, not live state).
 - Railway usage alerts / spend cap (carried from 5/3).
 
+**Next session focus (2026-05-07):**
+- Wire Alpaca **live** account alongside paper. Requires the multi-adapter routing fix (`Executor.register_adapter` currently keys by `AssetClass` only, so a second `EQUITIES` adapter would silently overwrite paper). Same fix would also unblock Polymarket — but Polymarket stays paused (still US-waitlisted).
+- Catch and diagnose Bug #6 from the new `Shadow live OK / FAILED` diagnostic logs.
+- Confirm equity signals fire on Thursday 5/7 market open (first market hours with the alpaca.py fixes).
+
 ---
 
 **Prior current state (2026-04-10) — kept for context:**
