@@ -40,6 +40,12 @@ def _to_float(value: Any) -> float:
 
 
 class KalshiAdapter:
+    is_paper = False
+
+    async def real_money_value(self) -> float:
+        """Kalshi balance is real even when observe_only blocks orders."""
+        return await self.get_account_value()
+
     """
     Kalshi prediction market adapter.
 

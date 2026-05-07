@@ -30,6 +30,7 @@ async def insert_portfolio_snapshot(
         cash=snapshot.cash,
         positions=positions_dict,
         risk_utilization=snapshot.risk_utilization,
+        real_money_total=snapshot.real_money_total,
     )
     session.add(record)
     await session.flush()

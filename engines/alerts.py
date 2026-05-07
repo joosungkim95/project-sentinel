@@ -14,6 +14,7 @@ import logging
 import os
 from datetime import datetime
 from enum import Enum
+from typing import Optional
 
 import httpx
 
@@ -184,17 +185,28 @@ async def alert_trade_executed(
     )
 
 
+def _portfolio_fields(
+    portfolio_value: float,
+    real_money_value: Optional[float],
+) -> dict[str, str]:
+    fields = {"Portfolio Value": f"${portfolio_value:,.2f}"}
+    if real_money_value is not None:
+        fields["Real Money"] = f"${real_money_value:,.2f}"
+    return fields
+
+
 async def alert_risk_event(
     event_type: str,
     details: str,
     portfolio_value: float,
+    real_money_value: Optional[float] = None,
 ) -> bool:
     """Alert when a risk event occurs."""
     return await send_alert(
         title=f"Risk Event: {event_type}",
         message=details,
         level=AlertLevel.WARNING,
-        fields={"Portfolio Value": f"${portfolio_value:,.2f}"},
+        fields=_portfolio_fields(portfolio_value, real_money_value),
     )
 
 
@@ -202,16 +214,16 @@ async def alert_circuit_breaker(
     reason: str,
     portfolio_value: float,
     daily_pnl: float,
+    real_money_value: Optional[float] = None,
 ) -> bool:
     """Alert when circuit breaker activates."""
+    fields = _portfolio_fields(portfolio_value, real_money_value)
+    fields["Daily P&L"] = f"${daily_pnl:,.2f}"
     return await send_alert(
         title="CIRCUIT BREAKER ACTIVATED",
         message=f"All trading halted. Reason: {reason}",
         level=AlertLevel.CRITICAL,
-        fields={
-            "Portfolio Value": f"${portfolio_value:,.2f}",
-            "Daily P&L": f"${daily_pnl:,.2f}",
-        },
+        fields=fields,
     )
 
 

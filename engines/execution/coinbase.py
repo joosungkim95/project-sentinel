@@ -24,6 +24,12 @@ logger = logging.getLogger(__name__)
 
 
 class CoinbaseAdapter:
+    is_paper = False
+
+    async def real_money_value(self) -> float:
+        """Coinbase always trades real funds."""
+        return await self.get_account_value()
+
     """
     Coinbase Advanced Trade platform adapter.
 

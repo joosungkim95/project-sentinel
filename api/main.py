@@ -338,6 +338,7 @@ async def get_portfolio():
             return {"status": "no_data", "message": "No portfolio snapshots yet"}
         return {
             "total_value": snapshot.total_value,
+            "real_money_total": snapshot.real_money_total,
             "cash": snapshot.cash,
             "positions": snapshot.positions,
             "risk_utilization": snapshot.risk_utilization,

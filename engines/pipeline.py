@@ -363,6 +363,7 @@ class TradingPipeline:
                                 f"{', '.join(risk_result.rejection_reasons)}"
                             ),
                             portfolio_value=portfolio.total_value,
+                            real_money_value=portfolio.real_money_total,
                         )
                         await self._log_outcome(signal, risk_result, None)
                         continue
@@ -408,6 +409,7 @@ class TradingPipeline:
                             reason="Automated circuit breaker trigger",
                             portfolio_value=portfolio.total_value,
                             daily_pnl=portfolio.daily_pnl,
+                            real_money_value=portfolio.real_money_total,
                         )
                         return results
 
@@ -841,6 +843,7 @@ class TradingPipeline:
                     f"{', '.join(risk_result.rejection_reasons)}"
                 ),
                 portfolio_value=portfolio.total_value,
+                real_money_value=portfolio.real_money_total,
             )
             await self._log_outcome(signal, risk_result, None)
             return None
@@ -875,6 +878,7 @@ class TradingPipeline:
                 reason="Automated circuit breaker trigger",
                 portfolio_value=portfolio.total_value,
                 daily_pnl=portfolio.daily_pnl,
+                real_money_value=portfolio.real_money_total,
             )
 
         return trade_result

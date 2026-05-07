@@ -48,6 +48,12 @@ class AlpacaAdapter:
     asset_class = AssetClass.EQUITIES
     is_paper = True
 
+    async def real_money_value(self) -> float:
+        """Paper-trading accounts contribute $0 to real money totals."""
+        if self.is_paper:
+            return 0.0
+        return await self.get_account_value()
+
     def __init__(
         self,
         api_key: str,

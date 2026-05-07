@@ -162,6 +162,7 @@ class PortfolioSnapshotRecord(Base):
     weekly_pnl = Column(Float, nullable=False, default=0.0)
     total_pnl = Column(Float, nullable=False, default=0.0)
     drawdown_from_peak = Column(Float, nullable=False, default=0.0)
+    real_money_total = Column(Float, nullable=False, default=0.0)
     created_at = Column(
         DateTime(timezone=True),
         default=lambda: datetime.now(timezone.utc),

@@ -115,6 +115,7 @@ class PortfolioSnapshot(BaseModel):
     weekly_pnl: float
     total_pnl: float
     drawdown_from_peak: float
+    real_money_total: float = 0.0  # Sum of non-paper adapter values
     timestamp: datetime = Field(default_factory=datetime.utcnow)
 
 

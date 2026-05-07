@@ -30,6 +30,21 @@ class PlatformAdapter(ABC):
     # without risking real money.
     observe_only: bool = False
 
+    # When True, this adapter's account holds simulated capital (e.g.
+    # Alpaca paper). It contributes to total_value but not to
+    # real_money_total. Override on the subclass or set in __init__.
+    is_paper: bool = False
+
+    async def real_money_value(self) -> float:
+        """How much real money this adapter contributes to the portfolio.
+
+        Default: full account value if not paper, else 0. Subclasses can
+        override to special-case observe_only or other quirks.
+        """
+        if self.is_paper:
+            return 0.0
+        return await self.get_account_value()
+
     @property
     @abstractmethod
     def platform_name(self) -> str:
@@ -166,6 +181,7 @@ class Executor:
     async def get_portfolio_snapshot(self) -> PortfolioSnapshot:
         """Aggregate portfolio across all platforms."""
         total_value = 0.0
+        real_money_total = 0.0
         total_cash = 0.0
         all_positions: dict[str, PositionInfo] = {}
         risk_utilization: dict[str, float] = {}
@@ -174,6 +190,7 @@ class Executor:
             try:
                 value = await adapter.get_account_value()
                 positions = await adapter.get_positions()
+                real_money_total += await adapter.real_money_value()
 
                 total_value += value
                 positions_value = sum(
@@ -204,6 +221,7 @@ class Executor:
             weekly_pnl=0.0,
             total_pnl=0.0,
             drawdown_from_peak=0.0,  # TODO: track peak value
+            real_money_total=real_money_total,
         )
 
     async def health_check_all(self) -> dict[str, bool]:
