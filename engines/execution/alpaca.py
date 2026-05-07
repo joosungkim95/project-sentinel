@@ -13,6 +13,8 @@ import logging
 from typing import Any, Optional
 from datetime import datetime
 
+from alpaca.data.timeframe import TimeFrame, TimeFrameUnit
+
 from engines.models import (
     AssetClass,
     PositionInfo,
@@ -23,6 +25,15 @@ from engines.models import (
 )
 
 logger = logging.getLogger(__name__)
+
+_ALPACA_TIMEFRAME_MAP: dict[str, TimeFrame] = {
+    "1Min": TimeFrame.Minute,
+    "5Min": TimeFrame(5, TimeFrameUnit.Minute),
+    "15Min": TimeFrame(15, TimeFrameUnit.Minute),
+    "1Hour": TimeFrame.Hour,
+    "4Hour": TimeFrame(4, TimeFrameUnit.Hour),
+    "1Day": TimeFrame.Day,
+}
 
 
 class AlpacaAdapter:
@@ -270,21 +281,13 @@ class AlpacaAdapter:
             from datetime import datetime, timedelta
 
             from alpaca.data.requests import StockBarsRequest
-            from alpaca.data.timeframe import TimeFrame
 
-            tf_map = {
-                "1Min": TimeFrame.Minute,
-                "5Min": TimeFrame(5, "Min"),
-                "15Min": TimeFrame(15, "Min"),
-                "1Hour": TimeFrame.Hour,
-                "4Hour": TimeFrame(4, "Hour"),
-                "1Day": TimeFrame.Day,
-            }
-
-            # Use explicit date range — free tier needs it for > 1 bar
-            # Trading days ~= calendar days * 5/7, so multiply by ~1.5
-            tf = tf_map.get(timeframe, TimeFrame.Day)
-            days_back = int(limit * 1.5) + 30 if tf == TimeFrame.Day else limit
+            # alpaca-py serializes timeframes via tf.value at request time;
+            # passing TimeFrame(N, "Min") with a string unit raises
+            # AttributeError because validate_timeframe lets it through but
+            # f"{amount}{unit.value}" then fails. Use TimeFrameUnit enums.
+            tf = _ALPACA_TIMEFRAME_MAP.get(timeframe, _ALPACA_TIMEFRAME_MAP["1Day"])
+            days_back = int(limit * 1.5) + 30 if timeframe == "1Day" else limit
             end = datetime.now()
             start = end - timedelta(days=days_back)
 
@@ -293,6 +296,7 @@ class AlpacaAdapter:
                 timeframe=tf,
                 start=start,
                 end=end,
+                feed="iex",
             )
             bars = self._data_client.get_stock_bars(request)
 

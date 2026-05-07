@@ -3,7 +3,7 @@
 > **This file is the single source of truth for remote Claude sessions (dispatch/cowork).**
 > It mirrors the local memory system. Updated at the end of every session.
 >
-> Last updated: 2026-05-03
+> Last updated: 2026-05-06
 
 ---
 
@@ -35,22 +35,21 @@ Jay is building Sentinel as a personal project. Experienced developer comfortabl
 - **Railway project:** https://railway.com/project/f440a704-9375-4faf-9a3b-2e614980c437
 - **Services:** sentinel (app), Postgres (DATABASE_URL linked), Redis (REDIS_URL linked)
 
-**Current state (2026-05-03):**
-- Now on Railway **Hobby plan** (paid). The free trial expired silently around Apr 22 and took prod offline (404 with `x-railway-fallback: true` header) — no proactive notification. Set up usage alerts / spend cap to prevent recurrence (TODO).
-- **Coinbase candle clamp** — `engines/execution/coinbase.py` now clamps any candle request to 349 bars at the adapter boundary. Coinbase rejects ≥350 candles per call; the 4h-aggregation path in `pipeline.py` was multiplying `DEFAULT_BARS_LIMIT (100) × factor (4) = 400` and silently getting empty bars back. This had been killing `trend_crypto` (the only 4h crypto strategy) — verified zero candle errors on the new container post-deploy.
-- **Kalshi prod URL migrated** — `KALSHI_BASE_URL` was a `.kalshi.co` typo (NXDOMAIN, demo's TLD) since Apr 4 — adapter silently failed to register at startup, all 5 prediction strategies dead for ~32 days. Then once we fixed `.co`→`.com`, Kalshi returned 401 with body "API has been moved to https://api.elections.kalshi.com/" on every endpoint (auth + public). Final URL: `https://api.elections.kalshi.com`. Old `trading-api.kalshi.com` is a dead cliff.
-- **Kalshi creds upgraded to prod** — old keys were demo-environment creds masked by the URL typo. New prod keys (API key `d1663e00-...` + RSA private key) saved to **gitignored `.env.prod`** as local backup. `.gitignore` tightened to cover `.env.*` (with `!.env.example` exception). `KALSHI_OBSERVE_ONLY=TRUE` still set — no real orders, just live data.
-- **Kalshi adapter schema migration** — Kalshi's API now returns `yes_bid_dollars` (string), `volume_fp` (string), `floor_strike` (number), etc. — old `yes_bid` (cents int), `volume` (int), `strike_price` keys are gone. `engines/execution/kalshi.py` updated with a `_to_float` helper across `get_quote`, `get_markets`, `get_crypto_markets`. KCS-02's "100% missing_fields" skip now drops to ~2%; remaining skips are real `low_volume` (election markets are thin) or `no_edge`.
-- **Pipeline now alive end-to-end** — first crypto cycle on the new container ran clean; first predictions cycle ran clean; all three core/scout prediction strategies (KCS-02, value_kalshi, skimmer_kalshi) report real `{low_volume, no_edge}` breakdowns instead of `{missing_fields: ALL}`.
-- **All 405 tests passing** post-Kalshi-schema-update. Updated test fixture in `tests/unit/test_kalshi_adapter.py` to use new field names.
-- **Polymarket scoped, paused.** International API (CLOB, wallet-based, polymarket.com) doesn't fit the NY legality story. US-regulated path (post-Dec-2025 QCX relaunch) is the target — Jay on waitlist. Architectural finding noted: `Executor.register_adapter` keys by `asset_class`, so adding Polymarket as a second `PREDICTIONS` adapter would silently overwrite Kalshi; needs a multi-adapter routing fix before Phase 1 lands. See `TODO.md` "Polymarket (paused)" section.
+**Current state (2026-05-06):**
+- **Equity silence diagnosed and fixed.** Two distinct bugs in `engines/execution/alpaca.py`:
+  - `tf_map` used `TimeFrame(N, "Min")` with a string second arg. alpaca-py 0.43.x's `validate_timeframe` lets the string through silently, but the later `tf.value` f-string raises `AttributeError: 'str' object has no attribute 'value'` — killing every scout/core equity bar fetch (210 errors/11h on the broken paths).
+  - `StockBarsRequest` was constructed without `feed="iex"`, so it defaulted to SIP. Free-tier Alpaca subscription doesn't permit SIP, so the daily-bar/sniper paths returned `{"message":"subscription does not permit querying recent SIP data"}` — the 15 hourly errors on IWM/QQQ/SPY in the log window. Fix: extracted `_ALPACA_TIMEFRAME_MAP` to module level using `TimeFrameUnit` enum, added explicit `feed="iex"`. 7 new unit tests.
+- **Kalshi 429 storm fixed at the source.** Pipeline's `_fetch_prediction_data` was running a per-market `get_quote(ticker)` enrichment loop on top of `get_markets(...)` — but `get_markets` already returns `yes_bid/no_bid/yes_ask/no_ask/volume/open_interest/status` directly. The loop was 100% redundant work. Removed it; 100+ calls/cycle drop to 1. value_kalshi/skimmer_kalshi keep the same scan depth.
+- **Portfolio snapshot writer wired.** `data/repositories/portfolio.insert_portfolio_snapshot` had been defined but **never called** anywhere in the codebase — `/portfolio` returning "no snapshots yet" was literal nothing-being-written, not a runtime failure. Added `_persist_portfolio_snapshot` to the scheduler on a 5-min IntervalTrigger.
+- **Logging now configured at startup.** `api/main.py` had no `logging.basicConfig`, so Python's default WARNING level was silently dropping every `logger.info` call: `Trade EXECUTED`, `Coinbase order submitted`, `Kalshi order submitted`, `Shadow mode ENABLED`, `Price refreshed`. Added `logging.basicConfig(level=os.environ.get("LOG_LEVEL", "INFO").upper(), ...)`. **This was the prerequisite for triaging Bug #6 below — the failure-side log line wasn't reaching Railway.**
+- **All 414 tests passing** (was 405; +9 new written test-first across 3 new test files).
 
-**Open observability gaps (next session):**
-- Shadow executor discards live `TradeResult` after counter increment (in-memory, no DB persistence). Coinbase account history confirmed zero real fills Apr 10–22 — can't audit from our DB. Needs persistence fix.
-- `/portfolio` returns "no portfolio snapshots yet" — snapshot persistence may be broken or never ran. Needs diagnostic.
+**Bug #6 — shadow live fill failures, NOT YET RESOLVED.** Pre-fix shadow_stats showed `live_executed=1, live_failed=22, fill_rate_match=4.3%, max_price_divergence=100%` since the 5/3 redeploy. Every trade in the DB is `platform: paper_*` — nothing landing on real Coinbase. The actual failure path was invisible because of the missing logging config; with INFO logs now flowing post-deploy, this is the immediate next thing to diagnose. Predictions should route via Kalshi `observe_only=True` → `_simulate_fill()` → `executed=True`, so seeing them in `live_failed` is suspicious — possibly an asset-class routing or adapter-registration issue.
+
+**Open items carried forward:**
+- Shadow executor discards live `TradeResult` after counter increment (no DB persistence). Coinbase account history confirmed zero real fills Apr 10–22 — can't audit from our DB. Persist live results.
 - Health monitor reports `kalshi: healthy` even when adapter failed to register at startup (initial-state bug, not live state).
-
-**Equity strategies still TBD** — 0 trades across 7 strategies in 22 days pre-trial-expiry. Couldn't diagnose Sunday 5/3 (markets closed). Reproduce on Monday 5/4 market open.
+- Railway usage alerts / spend cap (carried from 5/3).
 
 ---
 

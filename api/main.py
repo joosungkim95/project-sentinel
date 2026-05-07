@@ -55,6 +55,11 @@ from engines.strategy.predictions.news_driven import NewsDrivenStrategy
 from engines.strategy.predictions.crypto_probability import CryptoProbabilityStrategy
 from engines.strategy.predictions.event_catalyst import EventCatalystStrategy
 
+logging.basicConfig(
+    level=os.environ.get("LOG_LEVEL", "INFO").upper(),
+    format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+)
+
 logger = logging.getLogger(__name__)
 
 

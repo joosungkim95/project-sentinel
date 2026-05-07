@@ -109,12 +109,18 @@
 - [x] Migrate Kalshi prod URL to `api.elections.kalshi.com` — old `trading-api.kalshi.com` returns 401 with migration notice on every endpoint (auth + public)
 - [x] Replace demo Kalshi creds with prod creds (stored in gitignored `.env.prod`); tighten `.gitignore` to cover `.env.*`
 - [x] Update Kalshi adapter for new API schema — dollar strings (`yes_bid_dollars`), float-precision strings (`volume_fp`, `open_interest_fp`), and `floor_strike` instead of `strike_price`. All three reader methods (get_quote, get_markets, get_crypto_markets) updated.
-- [ ] Investigate equity strategy silence — 7 strategies, 0 trades in 22 days, pending Monday market open to reproduce
+- [x] Investigate equity strategy silence — root cause: `TimeFrame(N, "Min")` enum mismatch + missing `feed="iex"` in `StockBarsRequest` (alpaca-py 0.43.x). Fixed in `engines/execution/alpaca.py`.
 - [ ] Fix shadow executor live-fill observability — live `TradeResult` is currently discarded after counter increment; persist to DB or Redis so we can audit whether real Coinbase orders fire
-- [ ] Diagnose portfolio_snapshots persistence — `/portfolio` returns "no snapshots yet"
+- [x] Diagnose portfolio_snapshots persistence — `/portfolio` returned "no snapshots yet" because `insert_portfolio_snapshot` had **zero callers**. Wired into scheduler on 5-min IntervalTrigger.
 - [ ] Set Railway usage alerts / spend cap to prevent silent trial / billing suspension
-- [ ] Kalshi 429 rate limiting: value/skimmer strategies fetch per-market quote one-by-one; either batch via `/markets?tickers=` or throttle
+- [x] Kalshi 429 rate limiting — root cause: pipeline ran a redundant per-market `get_quote` loop on top of `get_markets` which already returns full pricing. Loop removed; 100+ calls/cycle → 1.
 - [ ] Kalshi `low_volume` skips: 100% of value/skimmer markets fail volume threshold — confirm whether this is real (election markets are thin) or a calibration issue
+
+## Discovered 2026-05-06
+- [x] Add `logging.basicConfig` at app startup — Python default = WARNING was silently dropping all `logger.info` lines (Trade EXECUTED, order submitted, etc.) for the entire deployment lifetime. Configurable via `LOG_LEVEL` env var.
+- [ ] **Bug #6 — Shadow live fill failures (22/23, fill_rate_match=4.3%).** Every signal since 5/3 redeploy went `paper_*` only; nothing on real Coinbase or Kalshi observe-only. Could not diagnose pre-deploy because the underlying log line was dropped by the missing logging config. Re-investigate after the 5/6 deploy lands and INFO logs are flowing.
+- [ ] **Verify equity signals fire post-deploy.** Watch the next equity scout/core cycle on the new container — should see `Fetched N bars for SPY` style lines and signal/trade output.
+- [ ] **Verify portfolio_snapshots populates** — should see "Portfolio snapshot persisted" log every 5 min; `/portfolio` should return data within 5 min of deploy.
 
 ## Polymarket (paused 2026-05-03)
 - [ ] **Blocker:** Jay is on the waitlist for Polymarket US (CFTC-regulated). The international polymarket.com path is wallet-based + legality-gray-area for NY, so we're waiting for the US-regulated invite before building the adapter.

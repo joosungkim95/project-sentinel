@@ -26,6 +26,7 @@ from apscheduler.triggers.interval import IntervalTrigger
 from config.scheduler_config import SchedulerConfig
 from config.tiers import StrategyTier
 from data.database import async_session_factory
+from data.repositories.portfolio import insert_portfolio_snapshot
 from engines.alerts import alert_system_error, send_alert, AlertLevel
 from engines.execution.base import Executor
 from engines.models import AssetClass, MarketRegime
@@ -140,6 +141,17 @@ class TradingScheduler:
                 interval,
                 len(strategies),
             )
+
+        # --- Portfolio snapshot persistence ---
+        self._scheduler.add_job(
+            self._persist_portfolio_snapshot,
+            trigger=IntervalTrigger(minutes=5),
+            id="portfolio_snapshot",
+            name="Portfolio snapshot persistence",
+            max_instances=1,
+            misfire_grace_time=60,
+        )
+        logger.info("Scheduled portfolio snapshot: every 5 min")
 
         # --- Learning Engine jobs ---
         if self.config.learning_enabled:
@@ -320,6 +332,20 @@ class TradingScheduler:
                     ),
                     level=AlertLevel.CRITICAL,
                 )
+
+    async def _persist_portfolio_snapshot(self) -> None:
+        """Snapshot the current portfolio state into portfolio_snapshots."""
+        try:
+            snapshot = await self.executor.get_portfolio_snapshot()
+            async with async_session_factory() as session:
+                snapshot_id = await insert_portfolio_snapshot(session, snapshot)
+                await session.commit()
+            logger.info(
+                "Portfolio snapshot persisted: id=%s total=$%.2f",
+                snapshot_id, snapshot.total_value,
+            )
+        except Exception as e:
+            logger.error("Failed to persist portfolio snapshot: %s", e)
 
     async def _run_fast_loop(self) -> None:
         """Run the daily learning fast loop."""

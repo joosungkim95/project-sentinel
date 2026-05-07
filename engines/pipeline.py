@@ -476,7 +476,6 @@ class TradingPipeline:
     ) -> dict[str, Any]:
         """Fetch market listings and quotes for prediction market strategies."""
         try:
-            get_quote = getattr(adapter, "get_quote", None)
             limit = strategy.parameters.get("scan_limit", 50)
 
             # KCS-02/KCS-05 need crypto-specific markets with strike_price/close_time
@@ -511,21 +510,6 @@ class TradingPipeline:
                 if get_markets is None:
                     return {}
                 markets = await get_markets(limit=limit)
-
-                # Enrich with full quote data if adapter supports it
-                if get_quote and markets:
-                    enriched = []
-                    for m in markets:
-                        ticker = m.get("ticker", "")
-                        if not ticker:
-                            continue
-                        try:
-                            quote = await get_quote(ticker)
-                            m.update(quote)
-                        except Exception:
-                            pass  # Use basic market data
-                        enriched.append(m)
-                    markets = enriched
 
                 if markets:
                     logger.info(

@@ -304,10 +304,11 @@ class TestSchedulerLifecycle:
         scheduler = _make_scheduler(strategies=[sma], config=config)
         scheduler.start()
 
-        # Should have exactly one job registered
         jobs = scheduler._scheduler.get_jobs()
-        assert len(jobs) == 1
-        assert jobs[0].id == f"{sma.tier.value}_{AssetClass.EQUITIES.value}"
+        tier_job_ids = {
+            j.id for j in jobs if j.id != "portfolio_snapshot"
+        }
+        assert tier_job_ids == {f"{sma.tier.value}_{AssetClass.EQUITIES.value}"}
 
         await scheduler.stop()
 
